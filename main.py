@@ -230,63 +230,6 @@ class ExplorerAgent:
             item["adalah_hari_ini"] = item["hari"].lower() == hari_ini.lower()
         return jadwal
 
-    def fetch_edlink_jadwal(self) -> list[dict]:
-        """
-        Versi ringkas untuk mengambil jadwal kuliah harian dari Edlink.
-        Digunakan oleh Orchestrator untuk briefing pagi.
-        """
-        token = os.getenv("EDLINK_TOKEN")
-        if not token:
-            return []
-
-        log.info("📅 Mengambil jadwal mingguan via Edlink API...")
-        url = "https://api.edlink.id/api/v1.4/account/weekly-schedules"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-        }
-        
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            # Edlink biasanya mengembalikan list objek jadwal atau dict dengan key 'data'
-            if isinstance(data, list):
-                raw_schedules = data
-            elif isinstance(data, dict):
-                raw_schedules = data.get("data") or []
-            else:
-                raw_schedules = []
-
-            if not raw_schedules:
-                log.warning("⚠️  Data jadwal dari Edlink kosong.")
-                return []
-            
-            # Map ke format internal PAIA
-            jadwal_final = []
-            hari_ini_indonesia = datetime.now(WIB).strftime("%A")
-            
-            # Mendukung struktur data -> sections (seperti JSON user)
-            for day_data in raw_schedules:
-                sections = day_data.get("sections", [])
-                nama_hari = day_data.get("day", "-")
-                
-                for section in sections:
-                    group = section.get("group", {})
-                    nama_matkul = group.get("name", "Matkul")
-                    
-                    jadwal_final.append({
-                        "nama": nama_matkul,
-                        "jam_mulai": section.get("startedAt", "00:00:00").split(" ")[-1][:5],
-                        "jam_selesai": section.get("endedAt", "00:00:00").split(" ")[-1][:5],
-                        "hari": nama_hari,
-                        "ruangan": section.get("room", "-"),
-                        "adalah_hari_ini": nama_hari.lower() == hari_ini_indonesia.lower()
-                    })
-            return jadwal_final
-
 
 
 # =============================================================================
