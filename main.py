@@ -450,11 +450,12 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
     def __init__(self, api_key: str):
         try:
             genai.configure(api_key=api_key)
+            # Gunakan gemini-1.5-flash untuk performa lebih cepat dan stabil
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-pro",
-                system_instruction=self.SYSTEM_PROMPT,
+                model_name="gemini-1.5-flash",
+                system_instruction=self.SYSTEM_PROMPT
             )
-            log.info("GeminiBrain siap dengan model gemini-1.5-pro.")
+            log.info("GeminiBrain (flash) siap.")
         except Exception as e:
             log.error(f"❌ Gagal inisialisasi Gemini: {e}")
             self.model = None
