@@ -426,16 +426,19 @@ Pastikan format HTML rapi dan mudah dibaca di Telegram.
 {self.SYSTEM_PROMPT}
 
 TUGAS KHUSUS:
-Ekstrak data tugas dari teks berikut: "{text}"
+Analisis teks berikut: "{text}"
 Waktu sekarang: {datetime.now(WIB).strftime('%Y-%m-%d')}
 
-Format output WAJIB HANYA JSON (tanpa penjelasan lain):
+Tentukan apakah pengguna ingin MENAMBAHKAN tugas baru, atau MENYELESAIKAN/MENGHAPUS tugas yang sudah ada.
+
+Format output WAJIB HANYA JSON (tanpa blok kode lain):
 {{
-    "task_name": "...",
-    "deadline": "YYYY-MM-DD",
-    "priority": "Tinggi/Sedang/Rendah",
-    "subtasks": ["step 1", "step 2"],
-    "explanation": "Berikan 1-2 kalimat motivasi/penjelasan singkat tentang inti tugas ini"
+    "intent": "create" atau "complete",
+    "task_name": "Nama tugas",
+    "deadline": "YYYY-MM-DD" (jika create, kosongkan jika complete),
+    "priority": "Tinggi/Sedang/Rendah" (jika create),
+    "subtasks": ["step 1", "step 2"] (jika create),
+    "explanation": "Penjelasan inti tugas (jika create), atau pujian/motivasi karena sudah selesai (jika complete)"
 }}
 """
         try:
@@ -482,6 +485,33 @@ class NotionDashboard:
             return True
         except Exception as e:
             log.error(f"❌ Gagal buat Notion card: {e}")
+            return False
+
+    def mark_task_completed(self, task_name: str) -> bool:
+        if not self.client: return False
+        try:
+            # Cari task berdasarkan nama
+            response = self.client.databases.query(
+                database_id=self.db_id,
+                filter={
+                    "property": "Name",
+                    "title": {
+                        "contains": task_name
+                    }
+                }
+            )
+            results = response.get("results", [])
+            if not results:
+                log.warning(f"⚠️ Tugas '{task_name}' tidak ditemukan di Notion.")
+                return False
+                
+            # Archive (hapus) task pertama yang ditemukan
+            page_id = results[0]["id"]
+            self.client.pages.update(page_id, archived=True)
+            log.info(f"🗑️ Tugas '{task_name}' berhasil dihapus/diselesaikan.")
+            return True
+        except Exception as e:
+            log.error(f"❌ Gagal menghapus Notion card: {e}")
             return False
 
     def get_upcoming_tasks(self) -> list[dict]:
@@ -690,16 +720,26 @@ class PAIAOrchestrator:
                     break
 
                 if self.notion:
-                    success = self.notion.create_task_card(
-                        task["task_name"], task["deadline"], task["priority"], 
-                        task["subtasks"], "Telegram Input"
-                    )
-                    if success:
-                        penjelasan = task.get('explanation', '')
-                        pesan_balasan = f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.\n\n💡 <i>{penjelasan}</i>"
-                        self.notifier.kirim_pesan(pesan_balasan, mode="HTML")
+                    intent = task.get("intent", "create")
+                    
+                    if intent == "complete":
+                        success = self.notion.mark_task_completed(task["task_name"])
+                        if success:
+                            pesan_balasan = f"🎉 Yeay! Tugas <b>{task['task_name']}</b> sudah saya coret dari Notion.\n\n💡 <i>{task.get('explanation', 'Kerja bagus!')}</i>"
+                            self.notifier.kirim_pesan(pesan_balasan, mode="HTML")
+                        else:
+                            self.notifier.kirim_pesan(f"⚠️ Maaf, saya tidak bisa menemukan tugas bernama <b>{task['task_name']}</b> di Notion Anda.", mode="HTML")
                     else:
-                        raise Exception("Gagal buat kartu Notion")
+                        success = self.notion.create_task_card(
+                            task["task_name"], task.get("deadline"), task.get("priority", "Sedang"), 
+                            task.get("subtasks", []), "Telegram Input"
+                        )
+                        if success:
+                            penjelasan = task.get('explanation', '')
+                            pesan_balasan = f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.\n\n💡 <i>{penjelasan}</i>"
+                            self.notifier.kirim_pesan(pesan_balasan, mode="HTML")
+                        else:
+                            raise Exception("Gagal buat kartu Notion")
                 
                 # Jika sampai sini tanpa error, tandai sebagai sukses
                 last_successful_update_id = update["update_id"]
