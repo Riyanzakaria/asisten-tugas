@@ -114,39 +114,25 @@ class TelegramManager:
             log.error(f"❌ Error kirim Telegram: {e}")
             return False
 
-    def get_unread_messages(self) -> list[str]:
-        """Ambil pesan baru dari user di Telegram menggunakan offset."""
-        offset = 0
-        if os.path.exists(self.offset_file):
-            try:
-                with open(self.offset_file, "r") as f:
-                    offset = int(f.read().strip())
-            except: pass
-                
+    def get_unread_updates(self) -> list:
+        """Ambil data JSON mentah dari getUpdates tanpa offset (Manual-ACK)."""
         url = f"{self.base_url}/getUpdates"
-        params = {"offset": offset, "timeout": 10}
-        messages = []
-        
         try:
-            resp = requests.get(url, params=params, timeout=20)
+            resp = requests.get(url, params={"timeout": 10}, timeout=20)
             resp.raise_for_status()
-            updates = resp.json().get("result", [])
-            
-            last_id = offset
-            for update in updates:
-                last_id = update["update_id"] + 1
-                msg = update.get("message", {})
-                if str(msg.get("chat", {}).get("id")) == str(self.chat_id):
-                    text = msg.get("text", "")
-                    if text: messages.append(text)
-            
-            if last_id > offset:
-                with open(self.offset_file, "w") as f:
-                    f.write(str(last_id))
+            return resp.json().get("result", [])
         except Exception as e:
-            log.error(f"❌ Error getUpdates Telegram: {e}")
-            
-        return messages
+            log.error(f"❌ Error get_unread_updates: {e}")
+            return []
+
+    def mark_as_read(self, last_update_id: int):
+        """Kirim offset untuk membersihkan antrean yang sukses diproses."""
+        url = f"{self.base_url}/getUpdates"
+        try:
+            requests.get(url, params={"offset": last_update_id + 1}, timeout=10)
+            log.info(f"🗑️ Antrean Telegram dibersihkan hingga ID: {last_update_id}")
+        except Exception as e:
+            log.error(f"❌ Gagal mark_as_read: {e}")
 
     def kirim_morning_briefing(self, konten: str):
         self.kirim_pesan(konten, mode="HTML")
@@ -438,9 +424,9 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
     def __init__(self, api_key: str):
         try:
             genai.configure(api_key=api_key)
-            # Gunakan gemini-1.5-flash untuk performa lebih cepat dan stabil
+            # Gunakan model dengan nama yang dikenali API
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
+                model_name="gemini-1.5-pro-latest", 
                 system_instruction=self.SYSTEM_PROMPT
             )
             log.info("GeminiBrain (flash) siap.")
@@ -736,25 +722,44 @@ class PAIAOrchestrator:
         jam_sekarang = sekarang.hour
         log.info(f"⏰ Waktu sekarang: {sekarang.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-        # FITUR 2: Cek pesan masuk Telegram
+        # FITUR 2: Cek pesan masuk Telegram (Alur Manual-ACK)
         log.info("📩 Mengecek input manual Telegram...")
-        manual_msgs = self.notifier.get_unread_messages()
-        for msg in manual_msgs:
-            log.info(f"💡 Input manual: {msg}")
-            task = self.brain.extract_task_from_text(msg)
-            if task and self.notion:
-                success = self.notion.create_task_card(
-                    task["task_name"], task["deadline"], task["priority"], 
-                    task["subtasks"], "Telegram Input"
-                )
-                if success:
-                    self.notifier.kirim_pesan(f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.", mode="HTML")
-                else:
-                    self.notifier.kirim_pesan("❌ Gagal membuat kartu di Notion. Periksa struktur database Anda.", mode="HTML")
-            else:
-                log.warning("⚠️ Gagal mengekstrak tugas dari pesan.")
-                # Jangan kirim pesan error untuk chat yang bukan perintah (opsional)
-                # self.notifier.kirim_pesan("⚠️ Saya menerima pesan Anda, tapi tidak mengerti instruksi tugasnya.", mode="HTML")
+        updates = self.notifier.get_unread_updates()
+        last_successful_update_id = None
+
+        for update in updates:
+            try:
+                msg = update.get("message", {})
+                if str(msg.get("chat", {}).get("id")) != str(self.notifier.chat_id):
+                    continue
+                
+                teks = msg.get("text", "")
+                if not teks:
+                    continue
+
+                log.info(f"💡 Memproses input manual: {teks}")
+                task = self.brain.extract_task_from_text(teks)
+                
+                if task and self.notion:
+                    success = self.notion.create_task_card(
+                        task["task_name"], task["deadline"], task["priority"], 
+                        task["subtasks"], "Telegram Input"
+                    )
+                    if success:
+                        self.notifier.kirim_pesan(f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.", mode="HTML")
+                    else:
+                        raise Exception("Gagal buat kartu Notion")
+                
+                # Jika sampai sini tanpa error, tandai sebagai sukses
+                last_successful_update_id = update["update_id"]
+
+            except Exception as e:
+                log.error(f"⚠️ Berhenti memproses antrean karena error: {e}")
+                break # Berhenti agar pesan yang gagal tidak hilang dari antrean
+
+        # Bersihkan antrean hanya jika ada yang sukses
+        if last_successful_update_id is not None:
+            self.notifier.mark_as_read(last_successful_update_id)
 
         if jam_sekarang == 6:
             log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
