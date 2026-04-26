@@ -37,57 +37,57 @@ log = logging.getLogger("PAIA")
 WIB = pytz.timezone("Asia/Jakarta")
 
 # ─────────────────────────────────────────────────────────────────────────
-#  DATA JADWAL STATIS (Dummy - sesuaikan dengan jadwal asli kamu)
-#  Format: dict berisi list tugas dengan deadline dan prioritas
+#  FALLBACK JADWAL ORGANISASI (Statis - isi sesuai jadwal HIMA kamu)
+#  Jadwal kuliah diambil otomatis dari Edlink API (fetch_edlink_jadwal).
+#  Hanya organisasi yang statis karena tidak ada di Edlink.
 # ─────────────────────────────────────────────────────────────────────────
-JADWAL_STATIS = {
-    "mata_kuliah": [
-        {
-            "nama": "Mobile Programming",
-            "topik": "Jetpack Compose - State & ViewModel",
-            "deadline": "2026-04-28 23:59",
-            "tipe": "Tugas Coding",
-            "prioritas": "TINGGI",
-        },
-        {
-            "nama": "Web Framework (Laravel)",
-            "topik": "Implementasi MVC Pattern + Eloquent ORM",
-            "deadline": "2026-04-27 08:00",
-            "tipe": "Tugas Coding",
-            "prioritas": "KRITIS",
-        },
-        {
-            "nama": "Data Engineering",
-            "topik": "BigQuery - Loading & Querying Dataset",
-            "deadline": "2026-04-30 23:59",
-            "tipe": "Praktikum",
-            "prioritas": "SEDANG",
-        },
-        {
-            "nama": "Basis Data Lanjut",
-            "topik": "Stored Procedure & Trigger",
-            "deadline": "2026-05-02 23:59",
-            "tipe": "Tugas",
-            "prioritas": "SEDANG",
-        },
-    ],
-    "organisasi_hima": [
-        {
-            "nama": "Rapat PSDM",
-            "topik": "Evaluasi Program Kerja Semester",
-            "waktu": "2026-04-26 19:00",
-            "tipe": "Rapat Wajib",
-            "prioritas": "TINGGI",
-        },
-        {
-            "nama": "Follow-up Rekrutmen",
-            "topik": "Rekapitulasi data calon anggota baru",
-            "waktu": "2026-04-27 15:00",
-            "tipe": "Tugas Organisasi",
-            "prioritas": "SEDANG",
-        },
-    ],
-}
+JADWAL_ORGANISASI_HIMA = [
+    {
+        "nama": "Rapat PSDM",
+        "topik": "Evaluasi Program Kerja Semester",
+        "waktu": "2026-04-26 19:00",
+        "tipe": "Rapat Wajib",
+        "prioritas": "TINGGI",
+    },
+    {
+        "nama": "Follow-up Rekrutmen",
+        "topik": "Rekapitulasi data calon anggota baru",
+        "waktu": "2026-04-27 15:00",
+        "tipe": "Tugas Organisasi",
+        "prioritas": "SEDANG",
+    },
+]
+
+# Fallback jadwal kuliah — dipakai HANYA jika Edlink API tidak bisa diakses
+JADWAL_KULIAH_FALLBACK = [
+    {
+        "nama": "Mobile Programming",
+        "dosen": "-",
+        "ruangan": "-",
+        "hari": "Senin",
+        "jam_mulai": "08:00",
+        "jam_selesai": "09:40",
+        "adalah_hari_ini": False,
+    },
+    {
+        "nama": "Web Framework (Laravel)",
+        "dosen": "-",
+        "ruangan": "-",
+        "hari": "Selasa",
+        "jam_mulai": "10:00",
+        "jam_selesai": "11:40",
+        "adalah_hari_ini": False,
+    },
+    {
+        "nama": "Data Engineering",
+        "dosen": "-",
+        "ruangan": "-",
+        "hari": "Rabu",
+        "jam_mulai": "13:00",
+        "jam_selesai": "14:40",
+        "adalah_hari_ini": False,
+    },
+]
 
 # Kata kunci topik yang akan dipicu pencarian otomatis referensi
 TOPIK_TRIGGER_SEARCH = [
@@ -205,55 +205,109 @@ class ExplorerAgent:
                     break  # Satu trigger per tugas cukup
         return referensi_map
 
-    def scrape_sevima_edlink(self, base_url: str = "https://edlink.id") -> list[dict]:
+    def scrape_sevima_edlink(self) -> list[dict]:
         """
-        [PLACEHOLDER] Scraping pengumuman & tugas baru dari Sevima Edlink.
-        
-        TODO: Isi bagian ini dengan logika login dan parsing HTML yang sebenarnya.
-        Langkah yang perlu diimplementasikan:
-          1. Buat session requests
-          2. POST ke endpoint login dengan credentials
-          3. Ambil token/cookie dari response
-          4. GET halaman dashboard/tugas
-          5. Parse HTML dengan BeautifulSoup
-          6. Ekstrak data tugas/pengumuman dan kembalikan sebagai list dict
+        Login ke Sevima Edlink via SSO dan ambil pengumuman/tugas baru.
 
-        :param base_url: URL dasar portal Sevima Edlink
-        :return: List dict berisi pengumuman/tugas baru
+        Token Edlink (EDLINK_TOKEN) bersifat ganda:
+          - Dipakai sebagai parameter ?token=... di URL SSO login
+          - Dipakai sebagai Bearer token untuk hit endpoint API
+        Keduanya menggunakan token yang SAMA dari Local Storage browser.
+
+        Credentials yang dibutuhkan di GitHub Secrets:
+          - EDLINK_TOKEN   : token dari Local Storage browser (key: 'token')
+          - EDLINK_EMAIL   : email akun Edlink
+          - EDLINK_PASSWORD: password akun Edlink
+
+        :return: List dict berisi pengumuman/tugas baru, atau [] jika gagal
         """
-        log.info("🌐 [Placeholder] Mencoba akses Sevima Edlink...")
+        # ── Ambil credentials dari environment variables (GitHub Secrets) ─
+        token = os.getenv("EDLINK_TOKEN", "")   # token yang sama untuk SSO & Bearer
+        email = os.getenv("EDLINK_EMAIL", "")
+        password = os.getenv("EDLINK_PASSWORD", "")
+
+        if not all([token, email, password]):
+            missing = [k for k, v in {
+                "EDLINK_TOKEN": token,
+                "EDLINK_EMAIL": email,
+                "EDLINK_PASSWORD": password,
+            }.items() if not v]
+            log.warning(f"⚠️  Scraper Edlink dilewati. Secrets belum diset: {missing}")
+            return []
+
+        log.info("🌐 Mencoba login ke Sevima Edlink via SSO...")
         pengumuman = []
         try:
-            # ── Contoh struktur request dasar (belum login) ──────────────
             sesi = requests.Session()
             sesi.headers.update({
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
-                )
+                ),
+                "Accept": "application/json, text/html",
             })
 
-            # TODO: Ganti dengan endpoint login yang benar
-            # payload_login = {"username": os.getenv("SEVIMA_USER"), "password": os.getenv("SEVIMA_PASS")}
-            # resp_login = sesi.post(f"{base_url}/login", data=payload_login, timeout=20)
+            # ── Step 1: POST login ke SSO Edlink ──────────────────────────
+            # EDLINK_TOKEN dipakai sebagai ?token= di URL SSO (token sama!)
+            sso_url = (
+                f"https://api.edlink.id/sso/auth"
+                f"?token={token}"
+                f"&redirect=https%3A%2F%2Fedlink.id%2Fpanel"
+            )
+            payload_login = {
+                "email": email,       # string key — bukan variable!
+                "password": password,
+            }
+            resp_login = sesi.post(sso_url, data=payload_login, timeout=20)
+            resp_login.raise_for_status()
+            log.info(f"✅ Login Edlink: status {resp_login.status_code}")
 
-            # TODO: Setelah login, akses halaman tugas
-            # resp_tugas = sesi.get(f"{base_url}/student/tasks", timeout=20)
-            # soup = BeautifulSoup(resp_tugas.text, "html.parser")
+            # ── Step 2: Fetch jadwal/tugas via API yang sudah punya token ─
+            # Setelah login berhasil, sesi sudah menyimpan cookie otomatis.
+            # Gunakan endpoint weekly-schedules yang sudah kita ketahui:
+            resp_tugas = sesi.get(
+                "https://api.edlink.id/api/v1.4/account/weekly-schedules",
+                timeout=20,
+            )
+            resp_tugas.raise_for_status()
 
-            # TODO: Parse elemen HTML yang berisi info tugas
-            # Contoh: cards = soup.select(".task-card")
-            # for card in cards:
-            #     pengumuman.append({
-            #         "judul": card.select_one(".task-title").text.strip(),
-            #         "deadline": card.select_one(".task-due").text.strip(),
-            #     })
+            # ── Step 3: Parse response ────────────────────────────────────
+            try:
+                data = resp_tugas.json()
+                # Jika response adalah JSON langsung
+                items = data if isinstance(data, list) else data.get("data", [])
+                for item in items:
+                    pengumuman.append({
+                        "judul": item.get("course_name") or item.get("name", "-"),
+                        "hari": item.get("day", "-"),
+                        "jam": f"{item.get('start_time','-')}-{item.get('end_time','-')}",
+                    })
+                log.info(f"✅ Berhasil ambil {len(pengumuman)} data dari Edlink.")
+            except ValueError:
+                # Jika response HTML, gunakan BeautifulSoup
+                log.info("📄 Response bukan JSON, mencoba parse HTML...")
+                soup = BeautifulSoup(resp_tugas.text, "html.parser")
+                # TODO: sesuaikan selector dengan struktur HTML Edlink
+                cards = soup.select(".task-card, .schedule-item")
+                for card in cards:
+                    judul_el = card.select_one(".task-title, .course-name")
+                    pengumuman.append({
+                        "judul": judul_el.text.strip() if judul_el else "?",
+                    })
 
-            log.info("ℹ️  Sevima scraper masih placeholder. Implementasi login diperlukan.")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response else "?"
+            if status == 401:
+                log.error("❌ Login Edlink gagal: credentials salah atau token expired (401).")
+            else:
+                log.error(f"❌ HTTP Error Edlink SSO: {status}")
         except requests.exceptions.ConnectionError:
-            log.warning("⚠️ Tidak dapat terhubung ke Sevima Edlink. Lewati.")
+            log.error("❌ Tidak dapat terhubung ke Edlink. Cek koneksi.")
+        except requests.exceptions.Timeout:
+            log.error("❌ Timeout saat request ke Edlink.")
         except Exception as e:
-            log.error(f"❌ Error saat scraping Sevima: {e}")
+            log.error(f"❌ Error tak terduga scraper Edlink: {e}", exc_info=True)
+
         return pengumuman
 
 
@@ -313,13 +367,16 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
 
     def analyze_and_plan(
         self,
-        jadwal: dict,
+        jadwal_kuliah: list,
+        jadwal_org: list,
         referensi: dict,
         waktu_sekarang: datetime,
     ) -> str:
         """
-        Analisis jadwal lengkap dan buat rencana harian dengan Gemini AI.
-        :param jadwal: Dict berisi semua tugas kuliah & organisasi
+        Analisis jadwal harian dan buat rencana kerja dengan Gemini AI.
+
+        :param jadwal_kuliah: List dict jadwal kuliah dari Edlink API (sudah dinormalisasi)
+        :param jadwal_org: List dict kegiatan organisasi HIMA (statis)
         :param referensi: Dict {topik: [list link]} hasil pencarian DuckDuckGo
         :param waktu_sekarang: Objek datetime dengan timezone WIB
         :return: String teks analisis dari Gemini (format HTML)
@@ -327,33 +384,51 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
         if not self.model:
             return "<b>❌ Gemini tidak tersedia. Periksa API key.</b>"
 
-        # ── Susun konteks jadwal menjadi string yang bisa dipahami AI ────
         tanggal_str = waktu_sekarang.strftime("%A, %d %B %Y pukul %H:%M WIB")
+        hari_ini_str = waktu_sekarang.strftime("%A")
 
-        tugas_kuliah_str = "\n".join([
-            f"  - [{t['prioritas']}] {t['nama']}: {t['topik']} | Deadline: {t['deadline']}"
-            for t in jadwal.get("mata_kuliah", [])
-        ])
+        # ── Format jadwal kuliah dari Edlink ──────────────────────────────
+        # Pisahkan jadwal hari ini vs minggu ini untuk konteks yang lebih fokus
+        jadwal_hari_ini = [j for j in jadwal_kuliah if j.get("adalah_hari_ini")]
+        jadwal_minggu_ini = [j for j in jadwal_kuliah if not j.get("adalah_hari_ini")]
 
+        def fmt_kuliah(j: dict) -> str:
+            return (
+                f"  • {j['nama']} | {j['hari']} {j['jam_mulai']}-{j['jam_selesai']} "
+                f"| Ruang: {j['ruangan']} | Dosen: {j['dosen']}"
+            )
+
+        kuliah_hari_ini_str = (
+            "\n".join(fmt_kuliah(j) for j in jadwal_hari_ini)
+            if jadwal_hari_ini else "  (Tidak ada kelas hari ini)"
+        )
+        kuliah_minggu_str = (
+            "\n".join(fmt_kuliah(j) for j in jadwal_minggu_ini)
+            if jadwal_minggu_ini else "  (Tidak ada jadwal lain minggu ini)"
+        )
+
+        # ── Format kegiatan organisasi ────────────────────────────────────
         kegiatan_org_str = "\n".join([
-            f"  - [{t['prioritas']}] {t['nama']}: {t['topik']} | Waktu: {t['waktu']}"
-            for t in jadwal.get("organisasi_hima", [])
-        ])
+            f"  • [{t['prioritas']}] {t['nama']}: {t['topik']} | Waktu: {t['waktu']}"
+            for t in jadwal_org
+        ]) if jadwal_org else "  (Tidak ada kegiatan organisasi terjadwal)"
 
+        # ── Format referensi DuckDuckGo ───────────────────────────────────
         referensi_str = ""
         if referensi:
             for topik, links in referensi.items():
-                referensi_str += f"\n  Referensi untuk '{topik}':\n"
+                referensi_str += f"\n  Referensi '{topik}':\n"
                 for link in links:
                     referensi_str += f"    * {link['judul']}: {link['url']}\n"
 
         prompt = f"""
 Sekarang adalah {tanggal_str}.
 
-Ini adalah jadwal lengkap saya hari ini dan beberapa hari ke depan:
+JADWAL KULIAH HARI INI ({hari_ini_str}) — Data dari Edlink:
+{kuliah_hari_ini_str}
 
-TUGAS KULIAH:
-{tugas_kuliah_str}
+JADWAL KULIAH SISA MINGGU INI — Data dari Edlink:
+{kuliah_minggu_str}
 
 KEGIATAN ORGANISASI HIMA:
 {kegiatan_org_str}
@@ -361,15 +436,16 @@ KEGIATAN ORGANISASI HIMA:
 REFERENSI YANG SUDAH DIKUMPULKAN HARI INI:
 {referensi_str if referensi_str else "  (Tidak ada referensi yang dikumpulkan otomatis hari ini)"}
 
-Tolong buat Morning Briefing yang komprehensif untuk saya dalam format HTML Telegram. 
+Tolong buat Morning Briefing yang komprehensif untuk saya dalam format HTML Telegram.
 Sertakan:
-1. Sapaan pagi yang menyemangati
-2. Ringkasan situasi hari ini (mana yang paling mendesak)
-3. Rencana kerja bertahap untuk tugas KRITIS/TINGGI (pecah jadi langkah kecil yang actionable)
-4. Strategi menyeimbangkan kuliah dan organisasi hari ini
-5. Tips teknis singkat (💡) untuk topik yang paling sulit
-6. Jika ada referensi, cantumkan sebagai link HTML <a href="url">judul</a>
-7. Penutup yang memotivasi
+1. Sapaan pagi yang menyemangati (sebutkan hari dan tanggal)
+2. Ringkasan kelas yang harus dihadiri hari ini beserta ruangannya
+3. Tips persiapan untuk setiap mata kuliah hari ini (materi apa yang perlu dibaca)
+4. Strategi menyeimbangkan kelas + kegiatan organisasi hari ini
+5. Preview jadwal besok agar bisa persiapan dari sekarang
+6. Tips teknis singkat (💡) untuk mata kuliah yang topiknya paling kompleks
+7. Jika ada referensi, cantumkan sebagai link HTML <a href="url">judul</a>
+8. Penutup yang memotivasi
 
 Pastikan format HTML rapi dan mudah dibaca di Telegram.
 """
@@ -413,66 +489,98 @@ class PAIAOrchestrator:
         self.notifier = TelegramNotifier(tg_token, tg_chat_id)
         self.explorer = ExplorerAgent()
         self.brain = GeminiBrain(gemini_key)
-        self.jadwal = JADWAL_STATIS
+
+        # ── Ambil jadwal kuliah dari Edlink API ───────────────────────────
+        # Jika EDLINK_TOKEN ada → fetch dari API (data real)
+        # Jika tidak ada / gagal → pakai JADWAL_KULIAH_FALLBACK (data statis)
+        log.info("📅 Mengambil jadwal kuliah dari Edlink...")
+        jadwal_dari_edlink = self.explorer.fetch_edlink_jadwal()
+
+        if jadwal_dari_edlink:
+            self.jadwal_kuliah = jadwal_dari_edlink
+            log.info(f"✅ Jadwal kuliah dari Edlink: {len(jadwal_dari_edlink)} entri.")
+        else:
+            self.jadwal_kuliah = JADWAL_KULIAH_FALLBACK
+            log.warning("⚠️  Menggunakan JADWAL_KULIAH_FALLBACK (Edlink tidak tersedia).")
+
+        # Jadwal organisasi selalu statis (tidak ada di Edlink)
+        self.jadwal_org = JADWAL_ORGANISASI_HIMA
 
         log.info("🚀 PAIAOrchestrator berhasil diinisialisasi.")
 
     def _cek_deadline_darurat(self) -> list[dict]:
         """
-        Cek apakah ada tugas dengan deadline kurang dari 6 jam dari sekarang.
-        :return: List tugas yang deadline-nya darurat
+        Cek apakah ada kelas yang dimulai dalam 6 jam ke depan hari ini.
+        Edlink hanya memberi jadwal (jam mulai), bukan deadline tugas.
+        Untuk deadline tugas, integrasikan endpoint Edlink assignments terpisah.
+        :return: List jadwal kelas yang akan segera dimulai
         """
         sekarang = datetime.now(WIB)
-        darurat = []
-        for tugas in self.jadwal.get("mata_kuliah", []):
+        akan_segera = []
+        for kelas in self.jadwal_kuliah:
+            if not kelas.get("adalah_hari_ini"):
+                continue
+            jam_mulai_str = kelas.get("jam_mulai", "")
+            if not jam_mulai_str or jam_mulai_str == "-":
+                continue
             try:
-                # Parse string deadline menjadi datetime object ber-timezone
-                dl = datetime.strptime(tugas["deadline"], "%Y-%m-%d %H:%M")
-                dl_wib = WIB.localize(dl)
-                selisih_jam = (dl_wib - sekarang).total_seconds() / 3600
-                if 0 < selisih_jam <= 6:
-                    darurat.append(tugas)
+                # Gabungkan tanggal hari ini + jam mulai kelas
+                tanggal_hari_ini = sekarang.strftime("%Y-%m-%d")
+                waktu_kelas = datetime.strptime(
+                    f"{tanggal_hari_ini} {jam_mulai_str}", "%Y-%m-%d %H:%M"
+                )
+                waktu_kelas_wib = WIB.localize(waktu_kelas)
+                selisih_jam = (waktu_kelas_wib - sekarang).total_seconds() / 3600
+
+                # Ingatkan jika kelas mulai dalam 1 jam ke depan
+                if 0 < selisih_jam <= 1:
+                    akan_segera.append(kelas)
                     log.warning(
-                        f"🔴 DEADLINE DARURAT: {tugas['nama']} "
-                        f"({selisih_jam:.1f} jam lagi)"
+                        f"🔔 KELAS SEGERA: {kelas['nama']} mulai "
+                        f"{jam_mulai_str} ({selisih_jam * 60:.0f} menit lagi)"
                     )
             except ValueError as e:
-                log.error(f"Format deadline tidak valid untuk '{tugas['nama']}': {e}")
-        return darurat
+                log.error(f"Format jam tidak valid untuk '{kelas['nama']}': {e}")
+        return akan_segera
 
     def jalankan_morning_briefing(self, waktu: datetime):
         """
         Alur PAGI (06:00 WIB):
-        1. Cari referensi dari web untuk topik-topik trigger
-        2. Analisis jadwal dengan Gemini
-        3. Kirim Morning Briefing ke Telegram
+        1. Jadwal kuliah sudah di-fetch dari Edlink saat __init__
+        2. Cari referensi DuckDuckGo berdasarkan nama mata kuliah hari ini
+        3. Analisis dengan Gemini → kirim Morning Briefing ke Telegram
         """
         log.info("☀️  Memulai alur Morning Briefing...")
 
-        # ── Step 1: Kumpulkan referensi dari DuckDuckGo ───────────────────
-        semua_tugas = self.jadwal.get("mata_kuliah", [])
-        referensi = self.explorer.cari_referensi_topik(semua_tugas)
+        # ── Step 1: Cari referensi untuk kelas-kelas hari ini ─────────────
+        # Konversi jadwal Edlink ke format yang dimengerti cari_referensi_topik()
+        kelas_hari_ini = [
+            {"topik": j["nama"]}  # Gunakan nama matkul sebagai query pencarian
+            for j in self.jadwal_kuliah
+            if j.get("adalah_hari_ini")
+        ]
+        referensi = self.explorer.cari_referensi_topik(kelas_hari_ini)
 
-        # ── Step 2 (Opsional): Coba scrape Sevima ────────────────────────
-        # pengumuman_sevima = self.explorer.scrape_sevima_edlink()
-
-        # ── Step 3: Analisis dengan Gemini AI ────────────────────────────
+        # ── Step 2: Analisis dengan Gemini AI ────────────────────────────
         briefing_konten = self.brain.analyze_and_plan(
-            jadwal=self.jadwal,
+            jadwal_kuliah=self.jadwal_kuliah,
+            jadwal_org=self.jadwal_org,
             referensi=referensi,
             waktu_sekarang=waktu,
         )
 
-        # ── Step 4: Tambahkan header ke pesan ────────────────────────────
-        tanggal_str = waktu.strftime("%d %B %Y")
+        # ── Step 3: Tambahkan header ke pesan ────────────────────────────
+        tanggal_str = waktu.strftime("%A, %d %B %Y")
+        sumber = "Edlink API" if len(self.jadwal_kuliah) != len(JADWAL_KULIAH_FALLBACK) else "Fallback"
         header = (
             f"🎓 <b>PAIA Morning Briefing</b>\n"
             f"📅 <b>{tanggal_str}</b>\n"
+            f"📡 <i>Sumber jadwal: {sumber}</i>\n"
             f"{'─' * 30}\n\n"
         )
         pesan_final = header + briefing_konten
 
-        # ── Step 5: Kirim ke Telegram ─────────────────────────────────────
+        # ── Step 4: Kirim ke Telegram ─────────────────────────────────────
         self.notifier.kirim_morning_briefing(pesan_final)
         log.info("✅ Morning Briefing berhasil dikirim.")
 

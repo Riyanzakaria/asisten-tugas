@@ -55,6 +55,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Satu token untuk semua keperluan Edlink (Bearer API + SSO login)
+          EDLINK_TOKEN: ${{ secrets.EDLINK_TOKEN }}
+          # Credentials login Edlink untuk scraping pengumuman/tugas
+          EDLINK_EMAIL: ${{ secrets.EDLINK_EMAIL }}
+          EDLINK_PASSWORD: ${{ secrets.EDLINK_PASSWORD }}
         run: |
           python main.py
 
