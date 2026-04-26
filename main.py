@@ -334,6 +334,63 @@ class ExplorerAgent:
 
         return pengumuman
 
+    def fetch_edlink_jadwal(self) -> list[dict]:
+        """
+        Versi ringkas untuk mengambil jadwal kuliah harian dari Edlink.
+        Digunakan oleh Orchestrator untuk briefing pagi.
+        """
+        token = os.getenv("EDLINK_TOKEN")
+        if not token:
+            return []
+
+        log.info("📅 Mengambil jadwal mingguan via Edlink API...")
+        url = "https://api.edlink.id/api/v1.4/account/weekly-schedules"
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            # Edlink biasanya mengembalikan list objek jadwal
+            raw_schedules = data if isinstance(data, list) else data.get("data", [])
+            
+            # Map ke format internal PAIA
+            jadwal_final = []
+            hari_ini_indonesia = datetime.now(WIB).strftime("%A")
+            # Mapping hari Inggris ke Indonesia jika perlu (Edlink biasanya sudah Indo/Angka)
+            
+            for item in raw_schedules:
+                nama_matkul = item.get("course_name") or item.get("course", {}).get("name", "Matkul")
+                hari_kuliah = item.get("day") # Biasanya 1-7 atau nama hari
+                
+                jadwal_final.append({
+                    "nama": nama_matkul,
+                    "jam_mulai": item.get("start_time", "00:00"),
+                    "jam_selesai": item.get("end_time", "00:00"),
+                    "hari": hari_kuliah,
+                    "adalah_hari_ini": str(hari_kuliah).lower() in [hari_ini_indonesia.lower(), "1"] # Logika sederhana
+                })
+            return jadwal_final
+        except Exception as e:
+            log.error(f"❌ Gagal fetch_edlink_jadwal: {e}")
+            return []
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response else "?"
+            if status == 401:
+                log.error("❌ Login Edlink gagal: credentials salah atau token expired (401).")
+            else:
+                log.error(f"❌ HTTP Error Edlink SSO: {status}")
+        except requests.exceptions.ConnectionError:
+            log.error("❌ Tidak dapat terhubung ke Edlink. Cek koneksi.")
+        except requests.exceptions.Timeout:
+            log.error("❌ Timeout saat request ke Edlink.")
+        except Exception as e:
+            log.error(f"❌ Error tak terduga scraper Edlink: {e}", exc_info=True)
+
+        return pengumuman
+
 
 # =============================================================================
 #  KELAS 3: GeminiBrain
