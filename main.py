@@ -430,8 +430,9 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
             available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
             log.info(f"📋 Model tersedia: {available_models}")
 
-            # Urutan prioritas model yang akan dicoba
+            # Urutan prioritas model yang akan dicoba (disesuaikan dengan akun Anda)
             priority_models = [
+                "models/gemini-2.5-flash",
                 "models/gemini-1.5-flash",
                 "models/gemini-1.5-pro",
                 "models/gemini-pro"
