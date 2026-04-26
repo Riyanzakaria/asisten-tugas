@@ -426,7 +426,7 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
             genai.configure(api_key=api_key)
             # Gunakan model dengan nama yang dikenali API
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-pro-latest", 
+                model_name="gemini-1.5-pro", 
                 system_instruction=self.SYSTEM_PROMPT
             )
             log.info("GeminiBrain (flash) siap.")
