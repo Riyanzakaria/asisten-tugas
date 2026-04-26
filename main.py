@@ -63,15 +63,15 @@ JADWAL_ORGANISASI_HIMA = [
 # Fallback jadwal kuliah — dipakai HANYA jika Edlink API tidak bisa diakses
 JADWAL_KULIAH_FALLBACK = [
     {"nama": "Komputasi Statistika", "hari": "Senin", "jam_mulai": "08:40", "jam_selesai": "10:35", "ruangan": "315"},
-    {"nama": "Pengujian Perangkat Lunak", "hari": "Senin", "jam_mulai": "13:35", "jam_selesai": "19:05", "ruangan": "Lab Multimedia"},
+    {"nama": "Pengujian Perangkat Lunak", "hari": "Senin", "jam_mulai": "13:35", "jam_selesai": "14:05", "ruangan": "Lab Multimedia"},
     {"nama": "Wawasan Transportasi Berkelanjutan", "hari": "Selasa", "jam_mulai": "08:40", "jam_selesai": "10:35", "ruangan": "313"},
     {"nama": "Pemrograman Mobile II", "hari": "Selasa", "jam_mulai": "12:45", "jam_selesai": "13:35", "ruangan": "-"},
-    {"nama": "Praktik Pemrograman Mobile II", "hari": "Selasa", "jam_mulai": "13:35", "jam_selesai": "19:05", "ruangan": "-"},
-    {"nama": "Kecerdasan Buatan", "hari": "Rabu", "jam_mulai": "07:00", "jam_selesai": "12:15", "ruangan": "-"},
+    {"nama": "Praktik Pemrograman Mobile II", "hari": "Selasa", "jam_mulai": "13:35", "jam_selesai": "14:05", "ruangan": "-"},
+    {"nama": "Kecerdasan Buatan", "hari": "Rabu", "jam_mulai": "08:00", "jam_selesai": "10:15", "ruangan": "-"},
     {"nama": "Bahasa Inggris", "hari": "Rabu", "jam_mulai": "12:45", "jam_selesai": "14:25", "ruangan": "301"},
     {"nama": "Manajemen Risiko Perangkat Lunak", "hari": "Kamis", "jam_mulai": "10:35", "jam_selesai": "12:15", "ruangan": "313"},
     {"nama": "Arsitektur Perangkat Lunak", "hari": "Kamis", "jam_mulai": "12:45", "jam_selesai": "14:25", "ruangan": "313"},
-    {"nama": "Data Engineering", "hari": "Jumat", "jam_mulai": "07:00", "jam_selesai": "12:15", "ruangan": "-"},
+    {"nama": "Data Engineering", "hari": "Jumat", "jam_mulai": "07:00", "jam_selesai": "11:15", "ruangan": "-"},
 ]
 
 # Kata kunci topik yang akan dipicu pencarian otomatis referensi
@@ -148,10 +148,20 @@ class TelegramManager:
     def kirim_panic_reminder(self, tugas: dict):
         pesan = (
             f"🔴 <b>PANIC REMINDER!</b>\n\n"
-            f"⚠️ Deadline dekat!\n\n"
+            f"⚠️ Kelas akan segera dimulai!\n\n"
             f"📌 <b>Mata Kuliah:</b> {tugas['nama']}\n"
             f"⏰ <b>Mulai:</b> {tugas['jam_mulai']}\n\n"
             f"💪 <i>Segera bersiap!</i>"
+        )
+        self.kirim_pesan(pesan, mode="HTML")
+
+    def kirim_task_reminder(self, tugas: dict):
+        pesan = (
+            f"🔔 <b>REMINDER TUGAS!</b>\n\n"
+            f"⚠️ Jangan lupa ada tugas yang mendekati deadline!\n\n"
+            f"📌 <b>Tugas:</b> {tugas['nama']}\n"
+            f"⏰ <b>Deadline:</b> {tugas['deadline']}\n\n"
+            f"💻 <i>Segera diselesaikan ya!</i>"
         )
         self.kirim_pesan(pesan, mode="HTML")
 
@@ -206,110 +216,19 @@ class ExplorerAgent:
                     break  # Satu trigger per tugas cukup
         return referensi_map
 
-    def scrape_sevima_edlink(self) -> list[dict]:
+    def get_jadwal_kuliah(self) -> list[dict]:
         """
-        Login ke Sevima Edlink via SSO dan ambil pengumuman/tugas baru.
-
-        Token Edlink (EDLINK_TOKEN) bersifat ganda:
-          - Dipakai sebagai parameter ?token=... di URL SSO login
-          - Dipakai sebagai Bearer token untuk hit endpoint API
-        Keduanya menggunakan token yang SAMA dari Local Storage browser.
-
-        Credentials yang dibutuhkan di GitHub Secrets:
-          - EDLINK_TOKEN   : token dari Local Storage browser (key: 'token')
-          - EDLINK_EMAIL   : email akun Edlink
-          - EDLINK_PASSWORD: password akun Edlink
-
-        :return: List dict berisi pengumuman/tugas baru, atau [] jika gagal
+        Mengambil jadwal kuliah. 
+        Karena Edlink sering expired, kita gunakan sistem Fallback Statis (TRPL 4B) yang akurat.
         """
-        # ── Ambil credentials dari environment variables (GitHub Secrets) ─
-        token = os.getenv("EDLINK_TOKEN", "")   # token yang sama untuk SSO & Bearer
-        email = os.getenv("EDLINK_EMAIL", "")
-        password = os.getenv("EDLINK_PASSWORD", "")
-
-        if not all([token, email, password]):
-            missing = [k for k, v in {
-                "EDLINK_TOKEN": token,
-                "EDLINK_EMAIL": email,
-                "EDLINK_PASSWORD": password,
-            }.items() if not v]
-            log.warning(f"⚠️  Scraper Edlink dilewati. Secrets belum diset: {missing}")
-            return []
-
-        log.info("🌐 Mencoba login ke Sevima Edlink via SSO...")
-        pengumuman = []
-        try:
-            sesi = requests.Session()
-            sesi.headers.update({
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
-                ),
-                "Accept": "application/json, text/html",
-            })
-
-            # ── Step 1: POST login ke SSO Edlink ──────────────────────────
-            # EDLINK_TOKEN dipakai sebagai ?token= di URL SSO (token sama!)
-            sso_url = (
-                f"https://api.edlink.id/sso/auth"
-                f"?token={token}"
-                f"&redirect=https%3A%2F%2Fedlink.id%2Fpanel"
-            )
-            payload_login = {
-                "email": email,       # string key — bukan variable!
-                "password": password,
-            }
-            resp_login = sesi.post(sso_url, data=payload_login, timeout=20)
-            resp_login.raise_for_status()
-            log.info(f"✅ Login Edlink: status {resp_login.status_code}")
-
-            # ── Step 2: Fetch jadwal/tugas via API yang sudah punya token ─
-            # Setelah login berhasil, sesi sudah menyimpan cookie otomatis.
-            # Gunakan endpoint weekly-schedules yang sudah kita ketahui:
-            resp_tugas = sesi.get(
-                "https://api.edlink.id/api/v1.4/account/weekly-schedules",
-                timeout=20,
-            )
-            resp_tugas.raise_for_status()
-
-            # ── Step 3: Parse response ────────────────────────────────────
-            try:
-                data = resp_tugas.json()
-                # Jika response adalah JSON langsung
-                items = data if isinstance(data, list) else data.get("data", [])
-                for item in items:
-                    pengumuman.append({
-                        "judul": item.get("course_name") or item.get("name", "-"),
-                        "hari": item.get("day", "-"),
-                        "jam": f"{item.get('start_time','-')}-{item.get('end_time','-')}",
-                    })
-                log.info(f"✅ Berhasil ambil {len(pengumuman)} data dari Edlink.")
-            except ValueError:
-                # Jika response HTML, gunakan BeautifulSoup
-                log.info("📄 Response bukan JSON, mencoba parse HTML...")
-                soup = BeautifulSoup(resp_tugas.text, "html.parser")
-                # TODO: sesuaikan selector dengan struktur HTML Edlink
-                cards = soup.select(".task-card, .schedule-item")
-                for card in cards:
-                    judul_el = card.select_one(".task-title, .course-name")
-                    pengumuman.append({
-                        "judul": judul_el.text.strip() if judul_el else "?",
-                    })
-
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response else "?"
-            if status == 401:
-                log.error("❌ Login Edlink gagal: credentials salah atau token expired (401).")
-            else:
-                log.error(f"❌ HTTP Error Edlink SSO: {status}")
-        except requests.exceptions.ConnectionError:
-            log.error("❌ Tidak dapat terhubung ke Edlink. Cek koneksi.")
-        except requests.exceptions.Timeout:
-            log.error("❌ Timeout saat request ke Edlink.")
-        except Exception as e:
-            log.error(f"❌ Error tak terduga scraper Edlink: {e}", exc_info=True)
-
-        return pengumuman
+        log.info("📅 Menggunakan jadwal kuliah Fallback (TRPL 4B)...")
+        # Tandai mana yang hari ini
+        hari_ini = datetime.now(WIB).strftime("%A")
+        # Buat copy agar tidak merusak data original
+        jadwal = [dict(x) for x in JADWAL_KULIAH_FALLBACK]
+        for item in jadwal:
+            item["adalah_hari_ini"] = item["hari"].lower() == hari_ini.lower()
+        return jadwal
 
     def fetch_edlink_jadwal(self) -> list[dict]:
         """
@@ -367,24 +286,7 @@ class ExplorerAgent:
                         "adalah_hari_ini": nama_hari.lower() == hari_ini_indonesia.lower()
                     })
             return jadwal_final
-        except Exception as e:
-            log.error(f"❌ Gagal fetch_edlink_jadwal: {e}")
-            return []
 
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response else "?"
-            if status == 401:
-                log.error("❌ Login Edlink gagal: credentials salah atau token expired (401).")
-            else:
-                log.error(f"❌ HTTP Error Edlink SSO: {status}")
-        except requests.exceptions.ConnectionError:
-            log.error("❌ Tidak dapat terhubung ke Edlink. Cek koneksi.")
-        except requests.exceptions.Timeout:
-            log.error("❌ Timeout saat request ke Edlink.")
-        except Exception as e:
-            log.error(f"❌ Error tak terduga scraper Edlink: {e}", exc_info=True)
-
-        return pengumuman
 
 
 # =============================================================================
@@ -473,6 +375,7 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
         jadwal_org: list,
         referensi: dict,
         waktu_sekarang: datetime,
+        tugas_notion: list = None,
     ) -> str:
         """
         Analisis jadwal harian dan buat rencana kerja dengan Gemini AI.
@@ -481,6 +384,7 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
         :param jadwal_org: List dict kegiatan organisasi HIMA (statis)
         :param referensi: Dict {topik: [list link]} hasil pencarian DuckDuckGo
         :param waktu_sekarang: Objek datetime dengan timezone WIB
+        :param tugas_notion: List dict tugas dari database Notion
         :return: String teks analisis dari Gemini (format HTML)
         """
         if not self.model:
@@ -522,6 +426,13 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
                 referensi_str += f"\n  Referensi '{topik}':\n"
                 for link in links:
                     referensi_str += f"    * {link['judul']}: {link['url']}\n"
+                    
+        # ── Format Tugas Notion ───────────────────────────────────────────
+        tugas_str = ""
+        if tugas_notion:
+            tugas_str = "\n".join([f"  • {t['nama']} (Deadline: {t['deadline']})" for t in tugas_notion])
+        else:
+            tugas_str = "  (Tidak ada tugas aktif di Notion yang mendekati deadline)"
 
         prompt = f"""
 Sekarang adalah {tanggal_str}.
@@ -535,6 +446,9 @@ JADWAL KULIAH SISA MINGGU INI — Data dari Edlink:
 KEGIATAN ORGANISASI HIMA:
 {kegiatan_org_str}
 
+TUGAS AKTIF DARI NOTION:
+{tugas_str}
+
 REFERENSI YANG SUDAH DIKUMPULKAN HARI INI:
 {referensi_str if referensi_str else "  (Tidak ada referensi yang dikumpulkan otomatis hari ini)"}
 
@@ -542,10 +456,10 @@ Tolong buat Morning Briefing yang komprehensif untuk saya dalam format HTML Tele
 Sertakan:
 1. Sapaan pagi yang menyemangati (sebutkan hari dan tanggal)
 2. Ringkasan kelas yang harus dihadiri hari ini beserta ruangannya
-3. Tips persiapan untuk setiap mata kuliah hari ini (materi apa yang perlu dibaca)
-4. Strategi menyeimbangkan kelas + kegiatan organisasi hari ini
-5. Preview jadwal besok agar bisa persiapan dari sekarang
-6. Tips teknis singkat (💡) untuk mata kuliah yang topiknya paling kompleks
+3. DAFTAR TUGAS NOTION: Sebutkan tugas-tugas yang ada, DAN berikan 1-2 kalimat PENJELASAN (maksud/tujuan) dari setiap tugas tersebut agar saya paham apa yang harus dikerjakan.
+4. Tips persiapan untuk setiap mata kuliah hari ini (materi apa yang perlu dibaca)
+5. Strategi menyeimbangkan kelas + kegiatan organisasi hari ini
+6. Preview jadwal besok agar bisa persiapan dari sekarang
 7. Jika ada referensi, cantumkan sebagai link HTML <a href="url">judul</a>
 8. Penutup yang memotivasi
 
@@ -577,7 +491,8 @@ Format output WAJIB HANYA JSON (tanpa penjelasan lain):
     "task_name": "...",
     "deadline": "YYYY-MM-DD",
     "priority": "Tinggi/Sedang/Rendah",
-    "subtasks": ["step 1", "step 2"]
+    "subtasks": ["step 1", "step 2"],
+    "explanation": "Berikan 1-2 kalimat motivasi/penjelasan singkat tentang inti tugas ini"
 }}
 """
         try:
@@ -626,6 +541,33 @@ class NotionDashboard:
             log.error(f"❌ Gagal buat Notion card: {e}")
             return False
 
+    def get_upcoming_tasks(self) -> list[dict]:
+        if not self.client: return []
+        try:
+            # Ambil tugas yang belum selesai dan deadline hari ini/besok (atau abaikan filter untuk simplicity)
+            # Kita ambil semua tugas yang belum 'Done' (asumsi belum ada filter status kompleks, kita ambil 10 terbaru saja)
+            response = self.client.databases.query(
+                database_id=self.db_id,
+                page_size=10
+            )
+            tasks = []
+            for page in response.get("results", []):
+                props = page.get("properties", {})
+                
+                # Ekstrak nama
+                name_prop = props.get("Name", {}).get("title", [])
+                task_name = name_prop[0].get("plain_text", "Tanpa Judul") if name_prop else "Tanpa Judul"
+                
+                # Ekstrak deadline
+                deadline_prop = props.get("Deadline", {}).get("date", {})
+                deadline = deadline_prop.get("start", "-") if deadline_prop else "-"
+                
+                tasks.append({"nama": task_name, "deadline": deadline})
+            return tasks
+        except Exception as e:
+            log.error(f"❌ Gagal fetch Notion tasks: {e}")
+            return []
+
 
 # =============================================================================
 #  KELAS 4: PAIAOrchestrator
@@ -652,23 +594,22 @@ class PAIAOrchestrator:
         self.brain = GeminiBrain(gemini_key)
         self.notion = NotionDashboard(notion_key, notion_db) if notion_key and notion_db else None
 
-        # Fetch jadwal Edlink
-        log.info("📅 Mengambil jadwal kuliah dari Edlink...")
-        jadwal_dari_edlink = self.explorer.fetch_edlink_jadwal()
-        self.jadwal_kuliah = jadwal_dari_edlink if jadwal_dari_edlink else JADWAL_KULIAH_FALLBACK
+        # Ambil jadwal kuliah (Mandiri)
+        self.jadwal_kuliah = self.explorer.get_jadwal_kuliah()
         self.jadwal_org = JADWAL_ORGANISASI_HIMA
 
         log.info("🚀 PAIAOrchestrator berhasil diinisialisasi.")
 
-    def _cek_deadline_darurat(self) -> list[dict]:
+    def _cek_deadline_darurat(self) -> tuple[list[dict], list[dict]]:
         """
-        Cek apakah ada kelas yang dimulai dalam 6 jam ke depan hari ini.
-        Edlink hanya memberi jadwal (jam mulai), bukan deadline tugas.
-        Untuk deadline tugas, integrasikan endpoint Edlink assignments terpisah.
-        :return: List jadwal kelas yang akan segera dimulai
+        Cek apakah ada kelas yang dimulai dalam 1 jam ke depan hari ini.
+        Juga cek apakah ada tugas Notion yang deadlinenya hari ini atau besok.
+        :return: Tuple (kelas_segera, tugas_segera)
         """
         sekarang = datetime.now(WIB)
-        akan_segera = []
+        kelas_segera = []
+        
+        # 1. Cek Kelas Kuliah
         for kelas in self.jadwal_kuliah:
             if not kelas.get("adalah_hari_ini"):
                 continue
@@ -686,14 +627,28 @@ class PAIAOrchestrator:
 
                 # Ingatkan jika kelas mulai dalam 1 jam ke depan
                 if 0 < selisih_jam <= 1:
-                    akan_segera.append(kelas)
+                    kelas_segera.append(kelas)
                     log.warning(
                         f"🔔 KELAS SEGERA: {kelas['nama']} mulai "
                         f"{jam_mulai_str} ({selisih_jam * 60:.0f} menit lagi)"
                     )
             except ValueError as e:
                 log.error(f"Format jam tidak valid untuk '{kelas['nama']}': {e}")
-        return akan_segera
+                
+        # 2. Cek Tugas Notion
+        tugas_segera = []
+        if self.notion:
+            tugas_notion = self.notion.get_upcoming_tasks()
+            hari_ini_str = sekarang.strftime("%Y-%m-%d")
+            besok_str = (sekarang + timedelta(days=1)).strftime("%Y-%m-%d")
+            
+            for t in tugas_notion:
+                dl = t.get("deadline", "")
+                if dl == hari_ini_str or dl == besok_str:
+                    tugas_segera.append(t)
+                    log.warning(f"🔔 TUGAS SEGERA: {t['nama']} deadline {dl}")
+
+        return kelas_segera, tugas_segera
 
     def jalankan_morning_briefing(self, waktu: datetime):
         """
@@ -713,21 +668,24 @@ class PAIAOrchestrator:
         ]
         referensi = self.explorer.cari_referensi_topik(kelas_hari_ini)
 
-        # ── Step 2: Analisis dengan Gemini AI ────────────────────────────
+        # ── Step 2: Ambil tugas dari Notion (Deadline Reminder) ──────────
+        tugas_notion = self.notion.get_upcoming_tasks() if self.notion else []
+
+        # ── Step 3: Analisis dengan Gemini AI ────────────────────────────
         briefing_konten = self.brain.analyze_and_plan(
             jadwal_kuliah=self.jadwal_kuliah,
             jadwal_org=self.jadwal_org,
             referensi=referensi,
             waktu_sekarang=waktu,
+            tugas_notion=tugas_notion
         )
 
         # ── Step 3: Tambahkan header ke pesan ────────────────────────────
         tanggal_str = waktu.strftime("%A, %d %B %Y")
-        sumber = "Edlink API" if len(self.jadwal_kuliah) != len(JADWAL_KULIAH_FALLBACK) else "Fallback"
         header = (
             f"🎓 <b>PAIA Morning Briefing</b>\n"
             f"📅 <b>{tanggal_str}</b>\n"
-            f"📡 <i>Sumber jadwal: {sumber}</i>\n"
+            f"📡 <i>Sumber jadwal: Sistem Mandiri</i>\n"
             f"{'─' * 30}\n\n"
         )
         pesan_final = header + briefing_konten
@@ -739,19 +697,25 @@ class PAIAOrchestrator:
     def jalankan_pengecekan_jam(self):
         """
         Alur JAM LAIN (Hourly):
-        - Cek apakah ada deadline darurat (< 6 jam)
-        - Jika ya: kirim Panic Reminder
-        - Jika tidak: diam (hemat API quota)
+        - Cek apakah ada kelas darurat (< 1 jam)
+        - Cek apakah ada tugas Notion (Deadline hari ini/besok)
+        - Jika ya: kirim Reminder
         """
-        log.info("🕐 Memulai pengecekan deadline jam ini...")
-        tugas_darurat = self._cek_deadline_darurat()
+        log.info("🕐 Memulai pengecekan kelas/tugas jam ini...")
+        kelas_darurat, tugas_darurat = self._cek_deadline_darurat()
 
+        if kelas_darurat:
+            for k in kelas_darurat:
+                self.notifier.kirim_panic_reminder(k)
+            log.info(f"🔴 {len(kelas_darurat)} Panic Reminder (Kelas) terkirim.")
+            
         if tugas_darurat:
-            for tugas in tugas_darurat:
-                self.notifier.kirim_panic_reminder(tugas)
-            log.info(f"🔴 {len(tugas_darurat)} Panic Reminder terkirim.")
-        else:
-            log.info("✅ Tidak ada deadline darurat. Bot diam (hemat API). ✓")
+            for t in tugas_darurat:
+                self.notifier.kirim_task_reminder(t)
+            log.info(f"🔴 {len(tugas_darurat)} Task Reminder (Tugas) terkirim.")
+
+        if not kelas_darurat and not tugas_darurat:
+            log.info("✅ Tidak ada kelas/tugas darurat. Bot diam (hemat API). ✓")
 
     def jalankan(self):
         """Entry point utama."""
@@ -788,7 +752,9 @@ class PAIAOrchestrator:
                         task["subtasks"], "Telegram Input"
                     )
                     if success:
-                        self.notifier.kirim_pesan(f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.", mode="HTML")
+                        penjelasan = task.get('explanation', '')
+                        pesan_balasan = f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.\n\n💡 <i>{penjelasan}</i>"
+                        self.notifier.kirim_pesan(pesan_balasan, mode="HTML")
                     else:
                         raise Exception("Gagal buat kartu Notion")
                 
