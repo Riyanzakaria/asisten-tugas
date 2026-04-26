@@ -11,7 +11,7 @@
 =============================================================================
 """
 
-import os
+import json
 import logging
 from datetime import datetime
 
@@ -20,6 +20,7 @@ import requests
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
+from notion_client import Client
 import google.generativeai as genai
 
 # ── Muat environment variables dari file .env (untuk development lokal) ──
@@ -98,25 +99,21 @@ TOPIK_TRIGGER_SEARCH = [
 
 
 # =============================================================================
-#  KELAS 1: TelegramNotifier
-#  Bertanggung jawab mengirim semua notifikasi ke Telegram
+#  KELAS 1: TelegramManager
+#  Bertanggung jawab mengirim pesan dan membaca input dari Telegram
 # =============================================================================
-class TelegramNotifier:
-    """Mengirim pesan ke Telegram menggunakan Bot API."""
+class TelegramManager:
+    """Mengelola notifikasi dan input pesan ke/dari Telegram menggunakan Bot API."""
 
     def __init__(self, token: str, chat_id: str):
         self.token = token
         self.chat_id = chat_id
         self.base_url = f"https://api.telegram.org/bot{token}"
-        log.info("TelegramNotifier siap.")
+        self.offset_file = "last_update_id.txt"
+        log.info("TelegramManager siap.")
 
     def kirim_pesan(self, teks: str, mode: str = "HTML") -> bool:
-        """
-        Kirim pesan ke Telegram.
-        :param teks: Isi pesan (mendukung HTML atau MarkdownV2)
-        :param mode: 'HTML' atau 'MarkdownV2'
-        :return: True jika berhasil, False jika gagal
-        """
+        """Kirim pesan ke Telegram."""
         url = f"{self.base_url}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
@@ -129,28 +126,54 @@ class TelegramNotifier:
             resp.raise_for_status()
             log.info("✅ Pesan Telegram berhasil dikirim.")
             return True
-        except requests.exceptions.Timeout:
-            log.error("❌ Timeout saat mengirim ke Telegram.")
-        except requests.exceptions.HTTPError as e:
-            log.error(f"❌ HTTP Error Telegram: {e} | Response: {resp.text}")
         except Exception as e:
-            log.error(f"❌ Error tak terduga saat kirim Telegram: {e}")
-        return False
+            log.error(f"❌ Error kirim Telegram: {e}")
+            return False
+
+    def get_unread_messages(self) -> list[str]:
+        """Ambil pesan baru dari user di Telegram menggunakan offset."""
+        offset = 0
+        if os.path.exists(self.offset_file):
+            try:
+                with open(self.offset_file, "r") as f:
+                    offset = int(f.read().strip())
+            except: pass
+                
+        url = f"{self.base_url}/getUpdates"
+        params = {"offset": offset, "timeout": 10}
+        messages = []
+        
+        try:
+            resp = requests.get(url, params=params, timeout=20)
+            resp.raise_for_status()
+            updates = resp.json().get("result", [])
+            
+            last_id = offset
+            for update in updates:
+                last_id = update["update_id"] + 1
+                msg = update.get("message", {})
+                if str(msg.get("chat", {}).get("id")) == str(self.chat_id):
+                    text = msg.get("text", "")
+                    if text: messages.append(text)
+            
+            if last_id > offset:
+                with open(self.offset_file, "w") as f:
+                    f.write(str(last_id))
+        except Exception as e:
+            log.error(f"❌ Error getUpdates Telegram: {e}")
+            
+        return messages
 
     def kirim_morning_briefing(self, konten: str):
-        """Kirim pesan Morning Briefing yang panjang dan terformat."""
         self.kirim_pesan(konten, mode="HTML")
 
     def kirim_panic_reminder(self, tugas: dict):
-        """Kirim pesan singkat Panic Reminder untuk deadline darurat."""
         pesan = (
             f"🔴 <b>PANIC REMINDER!</b>\n\n"
-            f"⚠️ Deadline kurang dari 6 jam!\n\n"
+            f"⚠️ Deadline dekat!\n\n"
             f"📌 <b>Mata Kuliah:</b> {tugas['nama']}\n"
-            f"📝 <b>Topik:</b> {tugas['topik']}\n"
-            f"⏰ <b>Deadline:</b> {tugas['deadline']}\n"
-            f"🔥 <b>Prioritas:</b> {tugas['prioritas']}\n\n"
-            f"💪 <i>Segera kerjakan! Jangan sampai terlambat!</i>"
+            f"⏰ <b>Mulai:</b> {tugas['jam_mulai']}\n\n"
+            f"💪 <i>Segera bersiap!</i>"
         )
         self.kirim_pesan(pesan, mode="HTML")
 
@@ -459,6 +482,67 @@ Pastikan format HTML rapi dan mudah dibaca di Telegram.
             log.error(f"❌ Gemini generate_content gagal: {e}")
             return f"<b>❌ Analisis Gemini gagal:</b> <i>{e}</i>"
 
+    def extract_task_from_text(self, text: str) -> dict:
+        """Ekstrak input teks manual menjadi struktur data tugas."""
+        if not self.model: return {}
+        prompt = f"""
+        Ekstrak data tugas dari teks berikut: "{text}"
+        Waktu sekarang: {datetime.now(WIB).strftime('%Y-%m-%d')}
+        
+        Format output HANYA JSON:
+        {{
+            "task_name": "...",
+            "deadline": "YYYY-MM-DD",
+            "priority": "Tinggi/Sedang/Rendah",
+            "subtasks": ["step 1", "step 2"]
+        }}
+        """
+        try:
+            res = self.model.generate_content(prompt)
+            clean_json = res.text.replace('```json', '').replace('```', '').strip()
+            return json.loads(clean_json)
+        except Exception as e:
+            log.error(f"❌ Gagal ekstrak tugas: {e}")
+            return {}
+
+# =============================================================================
+#  KELAS 5: NotionDashboard
+#  Sinkronisasi data ke Notion
+# =============================================================================
+class NotionDashboard:
+    def __init__(self, api_key: str, database_id: str):
+        self.db_id = database_id
+        try:
+            self.client = Client(auth=api_key)
+            log.info("NotionDashboard siap.")
+        except Exception as e:
+            log.error(f"❌ Notion init error: {e}")
+            self.client = None
+
+    def create_task_card(self, task_name, deadline, priority, subtasks, source):
+        if not self.client: return False
+        try:
+            children = []
+            if subtasks:
+                children.append({"object": "block", "type": "heading_3", "heading_3": {"rich_text": [{"text": {"content": "Subtasks"}}]}})
+                for st in subtasks:
+                    children.append({"object": "block", "type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [{"text": {"content": st}}]}})
+
+            self.client.pages.create(
+                parent={"database_id": self.db_id},
+                properties={
+                    "Name": {"title": [{"text": {"content": task_name}}]},
+                    "Deadline": {"date": {"start": deadline}} if deadline else {"date": None},
+                    "Priority": {"select": {"name": priority}},
+                    "Source": {"select": {"name": source}}
+                },
+                children=children
+            )
+            return True
+        except Exception as e:
+            log.error(f"❌ Gagal buat Notion card: {e}")
+            return False
+
 
 # =============================================================================
 #  KELAS 4: PAIAOrchestrator
@@ -468,42 +552,27 @@ class PAIAOrchestrator:
     """Orkestrator PAIA - mengkoordinasikan semua komponen sesuai jadwal."""
 
     def __init__(self):
-        # Ambil semua credentials dari environment variables
+        # Ambil credentials
         gemini_key = os.getenv("GEMINI_API_KEY", "")
         tg_token = os.getenv("TELEGRAM_TOKEN", "")
         tg_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+        notion_key = os.getenv("NOTION_API_KEY", "")
+        notion_db = os.getenv("NOTION_DATABASE_ID", "")
 
-        # Validasi credentials wajib ada
+        # Validasi
         if not all([gemini_key, tg_token, tg_chat_id]):
-            missing = [
-                k for k, v in {
-                    "GEMINI_API_KEY": gemini_key,
-                    "TELEGRAM_TOKEN": tg_token,
-                    "TELEGRAM_CHAT_ID": tg_chat_id,
-                }.items() if not v
-            ]
-            log.critical(f"❌ Env vars wajib tidak ditemukan: {missing}")
-            raise EnvironmentError(f"Missing required env vars: {missing}")
+            raise EnvironmentError("Missing core env vars")
 
-        # Inisialisasi semua komponen
-        self.notifier = TelegramNotifier(tg_token, tg_chat_id)
+        # Inisialisasi
+        self.notifier = TelegramManager(tg_token, tg_chat_id)
         self.explorer = ExplorerAgent()
         self.brain = GeminiBrain(gemini_key)
+        self.notion = NotionDashboard(notion_key, notion_db) if notion_key and notion_db else None
 
-        # ── Ambil jadwal kuliah dari Edlink API ───────────────────────────
-        # Jika EDLINK_TOKEN ada → fetch dari API (data real)
-        # Jika tidak ada / gagal → pakai JADWAL_KULIAH_FALLBACK (data statis)
+        # Fetch jadwal Edlink
         log.info("📅 Mengambil jadwal kuliah dari Edlink...")
         jadwal_dari_edlink = self.explorer.fetch_edlink_jadwal()
-
-        if jadwal_dari_edlink:
-            self.jadwal_kuliah = jadwal_dari_edlink
-            log.info(f"✅ Jadwal kuliah dari Edlink: {len(jadwal_dari_edlink)} entri.")
-        else:
-            self.jadwal_kuliah = JADWAL_KULIAH_FALLBACK
-            log.warning("⚠️  Menggunakan JADWAL_KULIAH_FALLBACK (Edlink tidak tersedia).")
-
-        # Jadwal organisasi selalu statis (tidak ada di Edlink)
+        self.jadwal_kuliah = jadwal_dari_edlink if jadwal_dari_edlink else JADWAL_KULIAH_FALLBACK
         self.jadwal_org = JADWAL_ORGANISASI_HIMA
 
         log.info("🚀 PAIAOrchestrator berhasil diinisialisasi.")
@@ -602,19 +671,29 @@ class PAIAOrchestrator:
             log.info("✅ Tidak ada deadline darurat. Bot diam (hemat API). ✓")
 
     def jalankan(self):
-        """
-        Entry point utama - menentukan alur berdasarkan jam saat ini (WIB).
-        """
+        """Entry point utama."""
         sekarang = datetime.now(WIB)
         jam_sekarang = sekarang.hour
         log.info(f"⏰ Waktu sekarang: {sekarang.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
+        # FITUR 2: Cek pesan masuk Telegram
+        log.info("📩 Mengecek input manual Telegram...")
+        manual_msgs = self.notifier.get_unread_messages()
+        for msg in manual_msgs:
+            log.info(f"💡 Input manual: {msg}")
+            task = self.brain.extract_task_from_text(msg)
+            if task and self.notion:
+                success = self.notion.create_task_card(
+                    task["task_name"], task["deadline"], task["priority"], 
+                    task["subtasks"], "Telegram Input"
+                )
+                if success:
+                    self.notifier.kirim_pesan(f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.", mode="HTML")
+
         if jam_sekarang == 6:
-            # ── Mode Pagi: Morning Briefing lengkap ───────────────────────
             log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
             self.jalankan_morning_briefing(sekarang)
         else:
-            # ── Mode Jam Lain: Pengecekan deadline darurat saja ───────────
             log.info(f"🕐 Jam {jam_sekarang:02d}:00 WIB → Mode Pengecekan Hourly")
             self.jalankan_pengecekan_jam()
 

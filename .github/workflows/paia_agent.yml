@@ -60,6 +60,9 @@ jobs:
           # Credentials login Edlink untuk scraping pengumuman/tugas
           EDLINK_EMAIL: ${{ secrets.EDLINK_EMAIL }}
           EDLINK_PASSWORD: ${{ secrets.EDLINK_PASSWORD }}
+          # Notion API
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: |
           python main.py
 
