@@ -424,9 +424,9 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
     def __init__(self, api_key: str):
         try:
             genai.configure(api_key=api_key)
-            # Gunakan model dengan nama yang dikenali API
+            # Menggunakan gemini-1.5-flash (terbaru & cepat)
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-pro", 
+                model_name="gemini-1.5-flash", 
                 system_instruction=self.SYSTEM_PROMPT
             )
             log.info("GeminiBrain (flash) siap.")
@@ -740,7 +740,12 @@ class PAIAOrchestrator:
                 log.info(f"💡 Memproses input manual: {teks}")
                 task = self.brain.extract_task_from_text(teks)
                 
-                if task and self.notion:
+                # PROTEKSI: Jika ekstraksi gagal, berhenti dan jangan tandai sebagai sukses
+                if not task:
+                    log.error("❌ Gagal mengekstrak tugas. Menghentikan antrean.")
+                    break
+
+                if self.notion:
                     success = self.notion.create_task_card(
                         task["task_name"], task["deadline"], task["priority"], 
                         task["subtasks"], "Telegram Input"
