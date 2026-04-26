@@ -424,12 +424,11 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
     def __init__(self, api_key: str):
         try:
             genai.configure(api_key=api_key)
-            # Menggunakan gemini-1.5-flash (terbaru & cepat)
+            # Menggunakan gemini-pro (model paling stabil & universal)
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash", 
-                system_instruction=self.SYSTEM_PROMPT
+                model_name="gemini-pro"
             )
-            log.info("GeminiBrain (flash) siap.")
+            log.info("GeminiBrain (gemini-pro) siap.")
         except Exception as e:
             log.error(f"❌ Gagal inisialisasi Gemini: {e}")
             self.model = None
@@ -531,20 +530,24 @@ Pastikan format HTML rapi dan mudah dibaca di Telegram.
     def extract_task_from_text(self, text: str) -> dict:
         """Ekstrak input teks manual menjadi struktur data tugas."""
         if not self.model: return {}
-        prompt = f"""
-        Ekstrak data tugas dari teks berikut: "{text}"
-        Waktu sekarang: {datetime.now(WIB).strftime('%Y-%m-%d')}
         
-        Format output HANYA JSON:
-        {{
-            "task_name": "...",
-            "deadline": "YYYY-MM-DD",
-            "priority": "Tinggi/Sedang/Rendah",
-            "subtasks": ["step 1", "step 2"]
-        }}
-        """
+        instruksi = f"""
+{self.SYSTEM_PROMPT}
+
+TUGAS KHUSUS:
+Ekstrak data tugas dari teks berikut: "{text}"
+Waktu sekarang: {datetime.now(WIB).strftime('%Y-%m-%d')}
+
+Format output WAJIB HANYA JSON (tanpa penjelasan lain):
+{{
+    "task_name": "...",
+    "deadline": "YYYY-MM-DD",
+    "priority": "Tinggi/Sedang/Rendah",
+    "subtasks": ["step 1", "step 2"]
+}}
+"""
         try:
-            res = self.model.generate_content(prompt)
+            res = self.model.generate_content(instruksi)
             clean_json = res.text.replace('```json', '').replace('```', '').strip()
             return json.loads(clean_json)
         except Exception as e:
