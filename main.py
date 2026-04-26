@@ -75,10 +75,18 @@ JADWAL_KULIAH_FALLBACK = [
 ]
 
 # Kata kunci topik yang akan dipicu pencarian otomatis referensi
+# Kata kunci topik yang akan dipicu pencarian otomatis referensi
 TOPIK_TRIGGER_SEARCH = [
-    "Jetpack Compose", "BigQuery", "Eloquent ORM",
-    "Kotlin Coroutines", "Laravel Livewire", "Apache Kafka",
-    "Stored Procedure", "ViewModel", "Data Pipeline",
+    # Mobile Programming II
+    "Retrofit", "Firebase Auth", "SQLite Android", "Jetpack Compose", "MVVM Pattern",
+    # Pengujian Perangkat Lunak
+    "Whitebox Testing", "Blackbox Testing", "Cyclomatic Complexity", "Selenium", "JUnit",
+    # Kecerdasan Buatan (AI)
+    "Fuzzy Logic", "Neural Network", "Naive Bayes", "Machine Learning Python",
+    # Arsitektur & Manajemen Risiko
+    "Microservices", "REST API", "Risk Mitigation", "ISO 27001", "Agile Scrum",
+    # Data Engineering
+    "ETL Pipeline", "Data Warehouse", "SQL Optimization", "NoSQL MongoDB"
 ]
 
 
