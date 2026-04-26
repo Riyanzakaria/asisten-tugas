@@ -12,6 +12,8 @@
 """
 
 import os
+import sys
+import time
 import json
 import logging
 from datetime import datetime
@@ -690,14 +692,15 @@ class PAIAOrchestrator:
         if not kelas_darurat and not tugas_darurat:
             log.info("✅ Tidak ada kelas/tugas darurat. Bot diam (hemat API). ✓")
 
-    def jalankan(self):
+    def jalankan(self, run_hourly=True):
         """Entry point utama."""
         sekarang = datetime.now(WIB)
         jam_sekarang = sekarang.hour
-        log.info(f"⏰ Waktu sekarang: {sekarang.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        
+        if run_hourly:
+            log.info(f"⏰ Waktu sekarang: {sekarang.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
         # FITUR 2: Cek pesan masuk Telegram (Alur Manual-ACK)
-        log.info("📩 Mengecek input manual Telegram...")
         updates = self.notifier.get_unread_updates()
         last_successful_update_id = None
 
@@ -752,19 +755,20 @@ class PAIAOrchestrator:
         if last_successful_update_id is not None:
             self.notifier.mark_as_read(last_successful_update_id)
 
-        if jam_sekarang == 6:
-            log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
-            self.jalankan_morning_briefing(sekarang)
-        else:
-            log.info(f"🕐 Jam {jam_sekarang:02d}:00 WIB → Mode Pengecekan Hourly")
-            self.jalankan_pengecekan_jam()
+        if run_hourly:
+            if jam_sekarang == 6:
+                log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
+                self.jalankan_morning_briefing(sekarang)
+            else:
+                log.info(f"🕐 Jam {jam_sekarang:02d}:00 WIB → Mode Pengecekan Hourly")
+                self.jalankan_pengecekan_jam()
 
 
 # =============================================================================
 #  ENTRY POINT UTAMA
 # =============================================================================
 def main():
-    """Fungsi utama yang dipanggil oleh GitHub Actions."""
+    """Fungsi utama yang dipanggil oleh GitHub Actions atau Terminal Lokal."""
     log.info("=" * 60)
     log.info("  PAIA - Personal Academic Intelligence Agent")
     log.info("  Mahasiswa TRPL - Politeknik Negeri Madiun")
@@ -772,19 +776,38 @@ def main():
 
     try:
         agen = PAIAOrchestrator()
-        agen.jalankan()
+        
+        # Mode Polling (Lokal): python main.py --poll
+        if "--poll" in sys.argv:
+            log.info("🔄 Berjalan dalam mode POLLING (Lokal). Tekan Ctrl+C untuk berhenti.")
+            last_hour = -1
+            while True:
+                # Modifikasi agar jalankan() tidak spam Morning Briefing tiap loop
+                sekarang = datetime.now(WIB)
+                jam_sekarang = sekarang.hour
+                
+                if jam_sekarang != last_hour:
+                    agen.jalankan(run_hourly=True)
+                    last_hour = jam_sekarang
+                else:
+                    agen.jalankan(run_hourly=False)
+                
+                time.sleep(5)
+        else:
+            # Mode Cron (GitHub Actions)
+            agen.jalankan()
+            
     except EnvironmentError as e:
-        # Error konfigurasi - workflow harus gagal agar terdeteksi
         log.critical(f"❌ Konfigurasi tidak lengkap: {e}")
         raise
+    except KeyboardInterrupt:
+        log.info("🛑 Bot dihentikan secara manual oleh pengguna.")
     except Exception as e:
-        # Error tak terduga - log tapi jangan crash workflow sepenuhnya
         log.error(f"❌ Error tak terduga di main: {e}", exc_info=True)
 
     log.info("=" * 60)
     log.info("  PAIA selesai dijalankan.")
     log.info("=" * 60)
-
 
 if __name__ == "__main__":
     main()
