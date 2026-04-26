@@ -345,7 +345,11 @@ class ExplorerAgent:
 
         log.info("📅 Mengambil jadwal mingguan via Edlink API...")
         url = "https://api.edlink.id/api/v1.4/account/weekly-schedules"
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
         
         try:
             resp = requests.get(url, headers=headers, timeout=15)
