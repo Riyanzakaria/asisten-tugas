@@ -356,8 +356,17 @@ class ExplorerAgent:
             resp.raise_for_status()
             data = resp.json()
             
-            # Edlink biasanya mengembalikan list objek jadwal
-            raw_schedules = data if isinstance(data, list) else data.get("data", [])
+            # Edlink biasanya mengembalikan list objek jadwal atau dict dengan key 'data'
+            if isinstance(data, list):
+                raw_schedules = data
+            elif isinstance(data, dict):
+                raw_schedules = data.get("data") or []
+            else:
+                raw_schedules = []
+
+            if not raw_schedules:
+                log.warning("⚠️  Data jadwal dari Edlink kosong.")
+                return []
             
             # Map ke format internal PAIA
             jadwal_final = []
