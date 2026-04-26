@@ -47,26 +47,39 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── Step 4: Eksekusi agen utama ─────────────────────────────────────
+      # ── Step 4: Kelola Cache Telegram Offset (Agar tidak duplikasi tugas) ──
+      - name: 📥 Restore Telegram Offset
+        uses: actions/cache@v3
+        with:
+          path: last_update_id.txt
+          # Gunakan hash dari file atau key statis untuk pencarian cache
+          key: telegram-offset-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            telegram-offset-${{ runner.os }}-
+            telegram-offset-
+
+      # ── Step 5: Eksekusi agen utama ─────────────────────────────────────
       - name: 🚀 Jalankan PAIA Agent
         env:
-          # Tarik secrets dari GitHub Secrets Repository
-          # Cara set: Settings > Secrets and variables > Actions > New repository secret
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Satu token untuk semua keperluan Edlink (Bearer API + SSO login)
           EDLINK_TOKEN: ${{ secrets.EDLINK_TOKEN }}
-          # Credentials login Edlink untuk scraping pengumuman/tugas
           EDLINK_EMAIL: ${{ secrets.EDLINK_EMAIL }}
           EDLINK_PASSWORD: ${{ secrets.EDLINK_PASSWORD }}
-          # Notion API
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: |
           python main.py
 
-      # ── Step 5: Tampilkan info jika terjadi kegagalan ───────────────────
+      - name: 📤 Save Telegram Offset
+        if: always()
+        uses: actions/cache@v3
+        with:
+          path: last_update_id.txt
+          key: telegram-offset-${{ runner.os }}-${{ github.run_id }}
+
+      # ── Step 6: Tampilkan info jika terjadi kegagalan ───────────────────
       - name: ❌ Notifikasi Gagal (jika ada error)
         if: failure()
         run: |
