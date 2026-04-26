@@ -424,11 +424,36 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
     def __init__(self, api_key: str):
         try:
             genai.configure(api_key=api_key)
-            # Menggunakan gemini-pro (model paling stabil & universal)
-            self.model = genai.GenerativeModel(
-                model_name="gemini-pro"
-            )
-            log.info("GeminiBrain (gemini-pro) siap.")
+            
+            # Cek daftar model yang tersedia untuk API Key ini
+            log.info("🔍 Mencari model Gemini yang tersedia untuk akun Anda...")
+            available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+            log.info(f"📋 Model tersedia: {available_models}")
+
+            # Urutan prioritas model yang akan dicoba
+            priority_models = [
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-pro",
+                "models/gemini-pro"
+            ]
+
+            selected_model = None
+            for model_path in priority_models:
+                if model_path in available_models:
+                    selected_model = model_path
+                    break
+            
+            if not selected_model and available_models:
+                selected_model = available_models[0]
+                log.warning(f"⚠️ Model prioritas tidak ditemukan, menggunakan: {selected_model}")
+
+            if selected_model:
+                self.model = genai.GenerativeModel(model_name=selected_model)
+                log.info(f"✅ GeminiBrain siap menggunakan model: {selected_model}")
+            else:
+                log.error("❌ Tidak ada model generatif yang ditemukan untuk API Key ini.")
+                self.model = None
+
         except Exception as e:
             log.error(f"❌ Gagal inisialisasi Gemini: {e}")
             self.model = None
