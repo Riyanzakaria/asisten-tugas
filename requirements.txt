@@ -15,8 +15,8 @@ python-dotenv>=1.0.0
 # DuckDuckGo Search API - pencarian web gratis tanpa API key
 duckduckgo-search>=6.1.0
 
-# Notion API Client
-notion-client>=2.2.1
+# Notion API Client (Pin ke versi 2.x agar tidak break karena perubahan di v3)
+notion-client>=2.2.1,<3.0.0
 
 # HTML Parser - untuk scraping portal Sevima Edlink
 beautifulsoup4>=4.12.0
