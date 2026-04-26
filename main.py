@@ -62,33 +62,16 @@ JADWAL_ORGANISASI_HIMA = [
 
 # Fallback jadwal kuliah — dipakai HANYA jika Edlink API tidak bisa diakses
 JADWAL_KULIAH_FALLBACK = [
-    {
-        "nama": "Mobile Programming",
-        "dosen": "-",
-        "ruangan": "-",
-        "hari": "Senin",
-        "jam_mulai": "08:00",
-        "jam_selesai": "09:40",
-        "adalah_hari_ini": False,
-    },
-    {
-        "nama": "Web Framework (Laravel)",
-        "dosen": "-",
-        "ruangan": "-",
-        "hari": "Selasa",
-        "jam_mulai": "10:00",
-        "jam_selesai": "11:40",
-        "adalah_hari_ini": False,
-    },
-    {
-        "nama": "Data Engineering",
-        "dosen": "-",
-        "ruangan": "-",
-        "hari": "Rabu",
-        "jam_mulai": "13:00",
-        "jam_selesai": "14:40",
-        "adalah_hari_ini": False,
-    },
+    {"nama": "Komputasi Statistika", "hari": "Senin", "jam_mulai": "08:40", "jam_selesai": "10:35", "ruangan": "315"},
+    {"nama": "Pengujian Perangkat Lunak", "hari": "Senin", "jam_mulai": "13:35", "jam_selesai": "19:05", "ruangan": "Lab Multimedia"},
+    {"nama": "Wawasan Transportasi Berkelanjutan", "hari": "Selasa", "jam_mulai": "08:40", "jam_selesai": "10:35", "ruangan": "313"},
+    {"nama": "Pemrograman Mobile II", "hari": "Selasa", "jam_mulai": "12:45", "jam_selesai": "13:35", "ruangan": "-"},
+    {"nama": "Praktik Pemrograman Mobile II", "hari": "Selasa", "jam_mulai": "13:35", "jam_selesai": "19:05", "ruangan": "-"},
+    {"nama": "Kecerdasan Buatan", "hari": "Rabu", "jam_mulai": "07:00", "jam_selesai": "12:15", "ruangan": "-"},
+    {"nama": "Bahasa Inggris", "hari": "Rabu", "jam_mulai": "12:45", "jam_selesai": "14:25", "ruangan": "301"},
+    {"nama": "Manajemen Risiko Perangkat Lunak", "hari": "Kamis", "jam_mulai": "10:35", "jam_selesai": "12:15", "ruangan": "313"},
+    {"nama": "Arsitektur Perangkat Lunak", "hari": "Kamis", "jam_mulai": "12:45", "jam_selesai": "14:25", "ruangan": "313"},
+    {"nama": "Data Engineering", "hari": "Jumat", "jam_mulai": "07:00", "jam_selesai": "12:15", "ruangan": "-"},
 ]
 
 # Kata kunci topik yang akan dipicu pencarian otomatis referensi
@@ -371,19 +354,24 @@ class ExplorerAgent:
             # Map ke format internal PAIA
             jadwal_final = []
             hari_ini_indonesia = datetime.now(WIB).strftime("%A")
-            # Mapping hari Inggris ke Indonesia jika perlu (Edlink biasanya sudah Indo/Angka)
             
-            for item in raw_schedules:
-                nama_matkul = item.get("course_name") or item.get("course", {}).get("name", "Matkul")
-                hari_kuliah = item.get("day") # Biasanya 1-7 atau nama hari
+            # Mendukung struktur data -> sections (seperti JSON user)
+            for day_data in raw_schedules:
+                sections = day_data.get("sections", [])
+                nama_hari = day_data.get("day", "-")
                 
-                jadwal_final.append({
-                    "nama": nama_matkul,
-                    "jam_mulai": item.get("start_time", "00:00"),
-                    "jam_selesai": item.get("end_time", "00:00"),
-                    "hari": hari_kuliah,
-                    "adalah_hari_ini": str(hari_kuliah).lower() in [hari_ini_indonesia.lower(), "1"] # Logika sederhana
-                })
+                for section in sections:
+                    group = section.get("group", {})
+                    nama_matkul = group.get("name", "Matkul")
+                    
+                    jadwal_final.append({
+                        "nama": nama_matkul,
+                        "jam_mulai": section.get("startedAt", "00:00:00").split(" ")[-1][:5],
+                        "jam_selesai": section.get("endedAt", "00:00:00").split(" ")[-1][:5],
+                        "hari": nama_hari,
+                        "ruangan": section.get("room", "-"),
+                        "adalah_hari_ini": nama_hari.lower() == hari_ini_indonesia.lower()
+                    })
             return jadwal_final
         except Exception as e:
             log.error(f"❌ Gagal fetch_edlink_jadwal: {e}")
@@ -761,6 +749,12 @@ class PAIAOrchestrator:
                 )
                 if success:
                     self.notifier.kirim_pesan(f"✅ Siap! Tugas <b>{task['task_name']}</b> sudah saya masukkan ke Notion.", mode="HTML")
+                else:
+                    self.notifier.kirim_pesan("❌ Gagal membuat kartu di Notion. Periksa struktur database Anda.", mode="HTML")
+            else:
+                log.warning("⚠️ Gagal mengekstrak tugas dari pesan.")
+                # Jangan kirim pesan error untuk chat yang bukan perintah (opsional)
+                # self.notifier.kirim_pesan("⚠️ Saya menerima pesan Anda, tapi tidak mengerti instruksi tugasnya.", mode="HTML")
 
         if jam_sekarang == 6:
             log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
