@@ -79,6 +79,8 @@ jobs:
           EDLINK_PASSWORD: ${{ secrets.EDLINK_PASSWORD }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          WA_PHONE: ${{ secrets.WA_PHONE }}
+          WA_APIKEY: ${{ secrets.WA_APIKEY }}
         run: |
           if [ "${{ github.event.inputs.force_briefing }}" == "true" ]; then
             echo "Memaksa mode Morning Briefing..."

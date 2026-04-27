@@ -173,6 +173,41 @@ class TelegramManager:
         self.kirim_pesan(pesan, mode="HTML")
 
 
+class WhatsAppManager:
+    """Mengelola notifikasi ke WhatsApp menggunakan CallMeBot API."""
+
+    def __init__(self, phone: str, apikey: str):
+        self.phone = phone
+        self.apikey = apikey
+        self.base_url = "https://api.callmebot.com/whatsapp.php"
+        log.info("WhatsAppManager siap.")
+
+    def kirim_pesan(self, teks: str) -> bool:
+        """Kirim pesan ke WhatsApp via CallMeBot."""
+        # Sanitasi dan konversi tag HTML sederhana ke format WhatsApp
+        teks = teks.replace("<b>", "*").replace("</b>", "*")
+        teks = teks.replace("<i>", "_").replace("</i>", "_")
+        teks = teks.replace("<s>", "~").replace("</s>", "~")
+        # Buang sisa tag HTML lainnya agar rapi
+        import re
+        teks = re.sub(r'<[^>]+>', '', teks)
+
+        payload = {
+            "phone": self.phone,
+            "text": teks,
+            "apikey": self.apikey
+        }
+        
+        try:
+            resp = requests.get(self.base_url, params=payload, timeout=15)
+            resp.raise_for_status()
+            log.info("✅ Pesan WhatsApp berhasil dikirim.")
+            return True
+        except Exception as e:
+            log.error(f"❌ Error kirim WhatsApp: {e}")
+            return False
+
+
 # =============================================================================
 #  KELAS 2: ExplorerAgent
 #  Sistem pencari proaktif - DuckDuckGo + placeholder Sevima Edlink
@@ -614,6 +649,8 @@ class PAIAOrchestrator:
         tg_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         notion_key = os.getenv("NOTION_API_KEY", "")
         notion_db = os.getenv("NOTION_DATABASE_ID", "")
+        wa_phone = os.getenv("WA_PHONE", "")
+        wa_apikey = os.getenv("WA_APIKEY", "")
 
         # Validasi
         if not all([gemini_key, tg_token, tg_chat_id]):
@@ -621,6 +658,7 @@ class PAIAOrchestrator:
 
         # Inisialisasi
         self.notifier = TelegramManager(tg_token, tg_chat_id)
+        self.wa_notifier = WhatsAppManager(wa_phone, wa_apikey) if wa_phone and wa_apikey else None
         self.explorer = ExplorerAgent()
         self.brain = GeminiBrain(gemini_key)
         self.notion = NotionDashboard(notion_key, notion_db) if notion_key and notion_db else None
@@ -721,8 +759,10 @@ class PAIAOrchestrator:
         )
         pesan_final = header + briefing_konten
 
-        # ── Step 4: Kirim ke Telegram ─────────────────────────────────────
+        # ── Step 4: Kirim ke Telegram & WhatsApp ─────────────────────────────────────
         self.notifier.kirim_morning_briefing(pesan_final)
+        if self.wa_notifier:
+            self.wa_notifier.kirim_pesan(pesan_final)
         log.info("✅ Morning Briefing berhasil dikirim.")
 
     def jalankan_evening_briefing(self, waktu: datetime):
@@ -746,6 +786,8 @@ class PAIAOrchestrator:
         )
         pesan_final = header + evaluasi_konten
         self.notifier.kirim_pesan(pesan_final)
+        if self.wa_notifier:
+            self.wa_notifier.kirim_pesan(pesan_final)
         log.info("✅ Evening Briefing berhasil dikirim.")
 
     def jalankan_pengecekan_jam(self):
