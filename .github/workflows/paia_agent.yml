@@ -7,16 +7,21 @@
 name: 🎓 PAIA - Academic Intelligence Agent
 
 on:
-  # Jalankan otomatis setiap awal jam (00 menit dari setiap jam)
+  # Jalankan otomatis setiap awal jam bernomor genap (setiap 2 jam)
   # Format: menit jam hari bulan hari-minggu
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 */2 * * *'
 
   # Izinkan eksekusi manual dari tab Actions di GitHub
   workflow_dispatch:
     inputs:
       force_briefing:
         description: 'Paksa kirim Morning Briefing sekarang'
+        type: boolean
+        required: false
+        default: false
+      force_evening_briefing:
+        description: 'Paksa kirim Evening Briefing sekarang'
         type: boolean
         required: false
         default: false
@@ -78,6 +83,9 @@ jobs:
           if [ "${{ github.event.inputs.force_briefing }}" == "true" ]; then
             echo "Memaksa mode Morning Briefing..."
             python main.py --briefing
+          elif [ "${{ github.event.inputs.force_evening_briefing }}" == "true" ]; then
+            echo "Memaksa mode Evening Briefing..."
+            python main.py --evening
           else
             python main.py
           fi

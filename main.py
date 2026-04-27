@@ -435,6 +435,47 @@ Pastikan format HTML rapi dan mudah dibaca di Telegram.
             log.error(f"❌ Gemini generate_content gagal: {e}")
             return f"<b>❌ Analisis Gemini gagal:</b> <i>{e}</i>"
 
+    def evaluate_evening_sprint(self, jadwal_kuliah: list, jadwal_org: list, waktu_sekarang: datetime, tugas_notion: list) -> str:
+        """Menyusun Evaluasi Sprint Sore dengan AI."""
+        if not self.model: return "<b>❌ Gemini tidak tersedia.</b>"
+
+        tanggal_str = waktu_sekarang.strftime("%A, %d %B %Y pukul %H:%M WIB")
+
+        jadwal_hari_ini = [j for j in jadwal_kuliah if j.get("adalah_hari_ini")]
+        kuliah_hari_ini_str = "\n".join([f"  • {j['nama']} | {j['jam_mulai']}-{j['jam_selesai']} | Ruang: {j['ruangan']}" for j in jadwal_hari_ini]) if jadwal_hari_ini else "  (Tidak ada kelas hari ini)"
+
+        kegiatan_org_str = "\n".join([f"  • {t['nama']}: {t['topik']} | Waktu: {t['waktu']}" for t in jadwal_org]) if jadwal_org else "  (Tidak ada kegiatan organisasi)"
+
+        tugas_str = "\n".join([f"  • {t['nama']} (Deadline: {t['deadline']})" for t in tugas_notion]) if tugas_notion else "  (Aman, tidak ada tugas mendesak)"
+
+        prompt = f"""
+Sekarang adalah {tanggal_str}.
+
+REVIEW KELAS HARI INI:
+{kuliah_hari_ini_str}
+
+REVIEW KEGIATAN ORGANISASI:
+{kegiatan_org_str}
+
+STATUS TUGAS AKTIF DI NOTION:
+{tugas_str}
+
+Tolong buat "Evening Briefing" (Evaluasi Sprint Sore) untuk saya.
+SANGAT PENTING: Gunakan HANYA format HTML standar yang didukung Telegram yaitu: <b>, <i>, <u>, <s>, <a>, <code>.
+DILARANG KERAS menggunakan Markdown (seperti **bold** atau # Header) dan JANGAN menggunakan tag HTML list seperti <p>, <ul>, <ol>, atau <li>. Gunakan emoji atau spasi untuk membuat daftar.
+
+Sertakan:
+1. Sapaan sore yang mengapresiasi kerja keras hari ini.
+2. Review singkat: Tanyakan apakah kelas & agenda hari ini berjalan lancar.
+3. Cek Tugas Notion: Tekankan tugas yang deadline-nya besok atau malam ini. Minta saya untuk fokus ke sana jika belum selesai.
+4. Saran penutup untuk istirahat (recharge) dan melepas penat setelah seharian beraktivitas.
+"""
+        log.info("🧠 Mengirim prompt Evening Sprint ke Gemini...")
+        try:
+            return self.model.generate_content(prompt).text
+        except Exception as e:
+            return f"<b>❌ Gagal Evaluasi Sore:</b> <i>{e}</i>"
+
     def extract_task_from_text(self, text: str) -> dict:
         """Ekstrak input teks manual menjadi struktur data tugas."""
         if not self.model: return {}
@@ -684,6 +725,29 @@ class PAIAOrchestrator:
         self.notifier.kirim_morning_briefing(pesan_final)
         log.info("✅ Morning Briefing berhasil dikirim.")
 
+    def jalankan_evening_briefing(self, waktu: datetime):
+        """Alur SORE (Evaluasi Sprint & Reminder Malam)"""
+        log.info("🌇  Memulai alur Evening Briefing...")
+        tugas_notion = self.notion.get_upcoming_tasks() if self.notion else []
+        
+        evaluasi_konten = self.brain.evaluate_evening_sprint(
+            jadwal_kuliah=self.jadwal_kuliah,
+            jadwal_org=self.jadwal_org,
+            waktu_sekarang=waktu,
+            tugas_notion=tugas_notion
+        )
+
+        tanggal_str = waktu.strftime("%A, %d %B %Y")
+        header = (
+            f"🌇 <b>PAIA Evening Briefing</b>\n"
+            f"📅 <b>{tanggal_str}</b>\n"
+            f"🎯 <i>Evaluasi Sprint Sore</i>\n"
+            f"{'─' * 30}\n\n"
+        )
+        pesan_final = header + evaluasi_konten
+        self.notifier.kirim_pesan(pesan_final)
+        log.info("✅ Evening Briefing berhasil dikirim.")
+
     def jalankan_pengecekan_jam(self):
         """
         Alur JAM LAIN (Hourly):
@@ -771,9 +835,14 @@ class PAIAOrchestrator:
             self.notifier.mark_as_read(last_successful_update_id)
 
         if run_hourly:
+            # 1. Rutinitas Pagi: Morning Briefing jam 06:00
             if jam_sekarang == 6:
                 log.info("🌅 Jam 06:00 WIB terdeteksi → Mode Morning Briefing")
                 self.jalankan_morning_briefing(sekarang)
+            # 2. Rutinitas Sore: Evening Briefing jam 17:00
+            elif jam_sekarang == 17:
+                log.info("🌇 Jam 17:00 WIB terdeteksi → Mode Evening Briefing")
+                self.jalankan_evening_briefing(sekarang)
             else:
                 log.info(f"🕐 Jam {jam_sekarang:02d}:00 WIB → Mode Pengecekan Hourly")
                 self.jalankan_pengecekan_jam()
@@ -796,6 +865,11 @@ def main():
         if "--briefing" in sys.argv:
             log.info("🚀 Memaksa pengiriman Morning Briefing sekarang juga...")
             agen.jalankan_morning_briefing(datetime.now(WIB))
+            
+        # Mode Paksa Kirim Evening Briefing: python main.py --evening
+        elif "--evening" in sys.argv:
+            log.info("🚀 Memaksa pengiriman Evening Briefing sekarang juga...")
+            agen.jalankan_evening_briefing(datetime.now(WIB))
             
         # Mode Polling (Lokal): python main.py --poll
         elif "--poll" in sys.argv:
