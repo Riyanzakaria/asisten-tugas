@@ -46,20 +46,7 @@ WIB = pytz.timezone("Asia/Jakarta")
 #  Hanya organisasi yang statis karena tidak ada di Edlink.
 # ─────────────────────────────────────────────────────────────────────────
 JADWAL_ORGANISASI_HIMA = [
-    {
-        "nama": "Rapat PSDM",
-        "topik": "Evaluasi Program Kerja Semester",
-        "waktu": "2026-04-26 19:00",
-        "tipe": "Rapat Wajib",
-        "prioritas": "TINGGI",
-    },
-    {
-        "nama": "Follow-up Rekrutmen",
-        "topik": "Rekapitulasi data calon anggota baru",
-        "waktu": "2026-04-27 15:00",
-        "tipe": "Tugas Organisasi",
-        "prioritas": "SEDANG",
-    },
+    
 ]
 
 # Fallback jadwal kuliah — dipakai HANYA jika Edlink API tidak bisa diakses
@@ -108,6 +95,11 @@ class TelegramManager:
 
     def kirim_pesan(self, teks: str, mode: str = "HTML") -> bool:
         """Kirim pesan ke Telegram."""
+        if mode == "HTML":
+            # Sanitasi: Buang tag HTML yang tidak didukung Telegram agar tidak error 400
+            for tag in ["<p>", "</p>", "<br>", "<br/>", "<br />", "<ul>", "</ul>", "<ol>", "</ol>", "<li>", "</li>", "<strong>", "</strong>"]:
+                teks = teks.replace(tag, "")
+                
         url = f"{self.base_url}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
@@ -237,12 +229,18 @@ class ExplorerAgent:
         Karena Edlink sering expired, kita gunakan sistem Fallback Statis (TRPL 4B) yang akurat.
         """
         log.info("📅 Menggunakan jadwal kuliah Fallback (TRPL 4B)...")
-        # Tandai mana yang hari ini
-        hari_ini = datetime.now(WIB).strftime("%A")
+        # Tandai mana yang hari ini (Translasi Inggris ke Indonesia)
+        hari_map = {
+            "monday": "senin", "tuesday": "selasa", "wednesday": "rabu",
+            "thursday": "kamis", "friday": "jumat", "saturday": "sabtu", "sunday": "minggu"
+        }
+        hari_ini_eng = datetime.now(WIB).strftime("%A").lower()
+        hari_ini_id = hari_map.get(hari_ini_eng, "")
+        
         # Buat copy agar tidak merusak data original
         jadwal = [dict(x) for x in JADWAL_KULIAH_FALLBACK]
         for item in jadwal:
-            item["adalah_hari_ini"] = item["hari"].lower() == hari_ini.lower()
+            item["adalah_hari_ini"] = item["hari"].lower() == hari_ini_id
         return jadwal
 
 
