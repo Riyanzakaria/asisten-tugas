@@ -344,9 +344,10 @@ Gunakan <b>bold</b> untuk judul penting, <i>italic</i> untuk tips, dan emoji yan
         jadwal_minggu_ini = [j for j in jadwal_kuliah if not j.get("adalah_hari_ini")]
 
         def fmt_kuliah(j: dict) -> str:
+            dosen = j.get('dosen', '-')
             return (
                 f"  • {j['nama']} | {j['hari']} {j['jam_mulai']}-{j['jam_selesai']} "
-                f"| Ruang: {j['ruangan']} | Dosen: {j['dosen']}"
+                f"| Ruang: {j['ruangan']} | Dosen: {dosen}"
             )
 
         kuliah_hari_ini_str = (
@@ -777,8 +778,13 @@ def main():
     try:
         agen = PAIAOrchestrator()
         
+        # Mode Paksa Kirim Briefing: python main.py --briefing
+        if "--briefing" in sys.argv:
+            log.info("🚀 Memaksa pengiriman Morning Briefing sekarang juga...")
+            agen.jalankan_morning_briefing(datetime.now(WIB))
+            
         # Mode Polling (Lokal): python main.py --poll
-        if "--poll" in sys.argv:
+        elif "--poll" in sys.argv:
             log.info("🔄 Berjalan dalam mode POLLING (Lokal). Tekan Ctrl+C untuk berhenti.")
             last_hour = -1
             while True:
