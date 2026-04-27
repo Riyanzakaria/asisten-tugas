@@ -15,6 +15,11 @@ on:
   # Izinkan eksekusi manual dari tab Actions di GitHub
   workflow_dispatch:
     inputs:
+      force_briefing:
+        description: 'Paksa kirim Morning Briefing sekarang'
+        type: boolean
+        required: false
+        default: false
       reason:
         description: 'Alasan menjalankan manual (opsional)'
         required: false
@@ -70,7 +75,12 @@ jobs:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: |
-          python main.py
+          if [ "${{ github.event.inputs.force_briefing }}" == "true" ]; then
+            echo "Memaksa mode Morning Briefing..."
+            python main.py --briefing
+          else
+            python main.py
+          fi
 
       - name: 📤 Save Telegram Offset
         if: always()
