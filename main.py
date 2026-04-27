@@ -120,8 +120,21 @@ class TelegramManager:
             resp.raise_for_status()
             log.info("✅ Pesan Telegram berhasil dikirim.")
             return True
+        except requests.exceptions.HTTPError as e:
+            log.error(f"❌ Error kirim Telegram: {e} - Detail: {e.response.text}")
+            if e.response.status_code == 400 and mode == "HTML":
+                log.info("🔄 Mencoba mengirim ulang tanpa parse_mode (Raw text)...")
+                payload.pop("parse_mode", None)
+                try:
+                    resp2 = requests.post(url, json=payload, timeout=15)
+                    resp2.raise_for_status()
+                    log.info("✅ Pesan Telegram (Fallback Raw) berhasil dikirim.")
+                    return True
+                except Exception as e2:
+                    log.error(f"❌ Fallback gagal: {e2}")
+            return False
         except Exception as e:
-            log.error(f"❌ Error kirim Telegram: {e}")
+            log.error(f"❌ Error kirim Telegram (Koneksi): {e}")
             return False
 
     def get_unread_updates(self) -> list:
@@ -398,7 +411,10 @@ TUGAS AKTIF DARI NOTION:
 REFERENSI YANG SUDAH DIKUMPULKAN HARI INI:
 {referensi_str if referensi_str else "  (Tidak ada referensi yang dikumpulkan otomatis hari ini)"}
 
-Tolong buat Morning Briefing yang komprehensif untuk saya dalam format HTML Telegram.
+Tolong buat Morning Briefing yang komprehensif untuk saya.
+SANGAT PENTING: Gunakan HANYA format HTML standar yang didukung Telegram yaitu: <b>, <i>, <u>, <s>, <a>, <code>.
+DILARANG KERAS menggunakan Markdown (seperti **bold** atau # Header) dan JANGAN menggunakan tag HTML list seperti <ul>, <ol>, atau <li>. Gunakan emoji atau spasi untuk membuat daftar.
+
 Sertakan:
 1. Sapaan pagi yang menyemangati (sebutkan hari dan tanggal)
 2. Ringkasan kelas yang harus dihadiri hari ini beserta ruangannya
